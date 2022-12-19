@@ -8,8 +8,8 @@ math.randomseed(0) -- TODO: switch with appropriate playdate stuff, maybe a debu
 print("Deck init")
 
 function build_deck()
-	local singles = {'0','S','R','D'} -- multiply by color
-	local doubles = {'1','2','3','4','5','6','7','8','9'} -- multiply by color by 2
+	local singles = {'0'} -- multiply by color
+	local doubles = {'1','2','3','4','5','6','7','8','9','D','R','S'} -- multiply by color by 2
 	local quads = {'W','X'} -- 4 of each, null color. I don't like X but I need something that comes after W
 	local colors = {'r','y','g','b'} -- capitalization?
 	-- this should make a reasonable ordering when sorted as well. Handy.
@@ -68,16 +68,33 @@ for i = 1, #players do
 	table.sort(players[i].hand)
 end
 
-table.insert(discard, table.remove(deck))
-
 local turn = math.random(#players)
 local order = 1 -- -1 for reverse
 
--- need to support initial wild (and therefore wilddraw)
--- OR... just secretly flip through the deck and swap it with the first normal card ;)
--- need to crossref some docs for esoteric edge cases
+do
+	-- make wilddraw an illegal first card
+	local first = table.remove(deck)
+	while first == 'Xz' do
+		-- put it back, somewhere that is NOT the top
+		table.insert(deck, math.random(#deck - 1), first)
+		first = table.remove(deck)
+	end
+	table.insert(discard, table.remove(deck))
+	
+	-- How do you render this if it's all applied immediately?
+	-- I guess init is a special case
+	
+	if first[1] == 'S' then
+		-- shift to 0-base, apply rotation, then shift back ;)
+		turn = (((turn - 1) + order) % 4) + 1
+	elseif first[1] == 'R' then
+		order = order * -1
+	end
+end
 
--- surely the 0 seed doesn't cause this problem and I can kick that can
+-- UHHHHH stomp over the card code if it's wild and the color has been selected?
+-- but then you need to remember to reset it
+-- otherwise we need an external wild color tracker
 
 print('TOD: ',discard[#discard])
 print('Current player: ', turn)
