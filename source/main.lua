@@ -5,6 +5,8 @@ local table = require "table"
 
 math.randomseed(0) -- TODO: switch with appropriate playdate stuff, maybe a debug toggle as well
 
+local PANIC_THRESHOLD = 4  -- 4 or 3????
+
 print("Deck init")
 
 function build_deck()
@@ -56,6 +58,7 @@ local discard = {} -- TODO: playdate table create
 local players = {} -- ^^
 for i = 1, 4 do
 	table.insert(players,{hand={};id=i})
+	-- id is some futureproofing. a function given a player can't tell who it is otherwise
 end
 
 -- deal hands
@@ -100,20 +103,62 @@ function dump()
 	end
 end
 
-function analyze()
+function analyze(whoami)
 	-- gather intel
 	-- flag everyone near winning
 	-- figure out which turn order is better
 	-- figure out skip/draw/wild strats
 	-- build hand plan?
+	local us_losing = false -- panic
+	local us_winning = #players[whoami].hand <= PANIC_THRESHOLD
+	local us_most_winning = true -- but are we the winningest? Causes panic
+	local least_cards = #players[whoami].hand
+
 	local intel = {}
 	for i = 1, #players do
-		table.inset(intel, {
-			winning=#players[i].hand <= 4; -- 4 or 3????
-			id=players[i].id;
-			distance=0 -- idk how to compute this just yet
-		}
+		if i != whoami then
+			-- thankfully our data on other players is VERY limited
+			table.inset(intel, {
+				winning=#players[i].hand <= PANIC_THRESHOLD,
+				most_winning=false, -- touch up after the fact
+				total=#players[i].hand, -- ugh I'll need it for nuance
+				id=players[i].id,
+				-- we are n away from ourself (if included)
+				distance=(((whoami - 1) + order * players[i].id) % #players) + 1,
+			}
+			us_losing = us_losing or intel[#intel].winning
+			us_most_winning = us_most_winning and #players[whoami].hand <= #players[i].hand
+			if #players[i].hand < least_cards then
+				least_cards = #players[i].hand
+			end
+		end
 	end
+	-- tag who has the least cards
+	for k, v in pairs(intel) do
+		if v.total == least_cards then
+			v.most_winning = true
+	end
+	-- sort by distance from us. we may need a mapping to total cards ordering... or just copy it
+	table.sort(intel, function(a, b) return a.distance < b.distance end)
+	
+	local panic = us_losing or not us_most_winning
+	local punish = intel[1].winning
+	local skip_override = false -- oh no don't skip into a landmine
+	local do_reverse = false -- mostly to get us out of a bad skip
+	if #intel >=2 then -- 3+ players
+		local triage = {}
+		for k,v in pairs(intel) do
+			table.insert(triage, {id=v.id, total=v.total, distance=v.distance,})
+		end
+		table.sort(triage, function(a, b) return a.total < b.total end)
+		-- checking triage order may be best way to determine moves
+		skip_override = intel[2].winning
+		-- what if 1 and 2 are equally winning, or 1 is more winning than 2.
+		--  is one fewer winning player turns better?
+		-- what if 2 is more winning than 1
+	end
+	
+	
 end
 
 function run()
