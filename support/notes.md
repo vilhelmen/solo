@@ -18,6 +18,7 @@ Sorting this way gives natural groupings for combos
 	* Skip is ideal if the next is close (or we're in 2 player?)
 	* Reverse is ideal if the new order maximizes the turns until the closest winner (or we're in 2 player?)
 		* what does reverse do in 2p???
+			* one upon a time there was a card so boring everyone died the end
 	* Draw is ideal if the next is close (traditionally also a skip??? but that seems lame/easy)
 * Combos are ideal (play maximization)
 	* combos that lead you to a bad color/away from a color you have more of is bad?
@@ -55,3 +56,4 @@ Sorting this way gives natural groupings for combos
 ## Maybe a house rules menu
 * draw parry
 * draw one only
+* Configurable initial hand count?

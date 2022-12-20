@@ -54,11 +54,11 @@ print(table.concat(deck,','))
 local discard = {} -- TODO: playdate table create
 -- just setting it to 4 for now
 local players = {} -- ^^
-for i = 1,4 do
-	table.insert(players,{hand={};})
+for i = 1, 4 do
+	table.insert(players,{hand={};id=i})
 end
 
--- how many are in a hand?
+-- deal hands
 for _ = 1,7 do
 	for i = 1, #players do
 		table.insert(players[i].hand, table.remove(deck))
@@ -68,41 +68,69 @@ for i = 1, #players do
 	table.sort(players[i].hand)
 end
 
+
 local turn = math.random(#players)
 local order = 1 -- -1 for reverse
+
 
 do
 	-- make wilddraw an illegal first card
 	local first = table.remove(deck)
 	while first == 'Xz' do
-		-- put it back, somewhere that is NOT the top
+		-- put it back, somewhere that is NOT the top, pls
 		table.insert(deck, math.random(#deck - 1), first)
 		first = table.remove(deck)
 	end
-	table.insert(discard, table.remove(deck))
-	
-	-- How do you render this if it's all applied immediately?
-	-- I guess init is a special case
-	
-	if first[1] == 'S' then
-		-- shift to 0-base, apply rotation, then shift back ;)
-		turn = (((turn - 1) + order) % 4) + 1
-	elseif first[1] == 'R' then
-		order = order * -1
-	end
+	-- moving first card to top deck instead of top of discard
+	-- this lets us play it using regular flow for rendering
+	table.insert(deck, first)
 end
 
 -- UHHHHH stomp over the card code if it's wild and the color has been selected?
 -- but then you need to remember to reset it
 -- otherwise we need an external wild color tracker
 
-print('TOD: ',discard[#discard])
-print('Current player: ', turn)
-print('Order: ', order)
-print('Hands: ')
-for i = 1,#players do
-	print('', i, table.concat(players[i].hand,','))
+function dump()
+	print('TOD: ', discard[#discard])
+	print('Current player: ', turn)
+	print('Order: ', order)
+	print('Hands: ')
+	for i = 1, #players do
+		print('', i, table.concat(players[i].hand, ','))
+	end
 end
 
--- how much of individual hand strat data can be cached between turns?
--- combos and non-normie cards are the only ones of real interest
+function analyze()
+	-- gather intel
+	-- flag everyone near winning
+	-- figure out which turn order is better
+	-- figure out skip/draw/wild strats
+	-- build hand plan?
+	local intel = {}
+	for i = 1, #players do
+		table.inset(intel, {
+			winning=#players[i].hand <= 4; -- 4 or 3????
+			id=players[i].id;
+			distance=0 -- idk how to compute this just yet
+		}
+	end
+end
+
+function run()
+while true do
+	
+end
+end
+
+
+run()
+
+
+
+
+if first[1] == 'S' then
+	-- shift to 0-base, apply rotation, then shift back ;)
+	turn = (((turn - 1) + order) % 4) + 1
+elseif first[1] == 'R' then
+	order = order * -1
+end
