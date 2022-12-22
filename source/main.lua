@@ -7,8 +7,8 @@ math.randomseed(0) -- TODO: switch with appropriate playdate stuff, maybe a debu
 
 local PANIC_THRESHOLD = 3  -- 4 or 3????
 
-DEFAULT_SORT = nil -- it just works
-function DISPLAY_SORT(a, b)
+local DEFAULT_SORT = nil -- it just works
+local function DISPLAY_SORT(a, b)
 	if a[2] < b[2] then
 		return true
 	elseif (a[2] == b[2]) then
@@ -125,7 +125,7 @@ function analyze(whoami)
 
 	local intel = {}
 	for i = 1, #players do
-		if i != whoami then
+		if i ~= whoami then
 			-- thankfully our data on other players is VERY limited
 			table.inset(intel, {
 				winning=#players[i].hand <= PANIC_THRESHOLD,
@@ -134,7 +134,7 @@ function analyze(whoami)
 				id=players[i].id,
 				-- we are n away from ourself (if included)
 				distance=(((whoami - 1) + order * players[i].id) % #players) + 1,
-			}
+			})
 			us_losing = us_losing or intel[#intel].winning
 			us_most_winning = us_most_winning and #players[whoami].hand <= #players[i].hand
 			if #players[i].hand < least_cards then
@@ -172,35 +172,72 @@ function analyze(whoami)
 	-- do we rummage through our playables now?
 end
 
+
 function draw(whoami)
 	-- draw until playable, checking deck exhaustion and maybe game end
+	-- return set of drawn cards, final one should be playable. Nil if game over
+	-- !!!!!! make sure any wild drawn isn't a 3code
+	--  which is to say be sure to purge 3codes on discard shuffle
 	nil
 end
 
 function can_play(whoami)
-	-- parse our hand and see what we can do, optionally draw? leave that for caller?
+	-- Figure out what we can play. Wilds go to the back (read, if top is z you have no choice)
 	local playable = {}
-	for k, v = pairs(players[whoami].hand) do
-		-- same color, same symbol, wilds
+
+	for k, v in pairs(players[whoami].hand) do
+		-- same color, same symbol, owned wilds, color matching played wild
 		-- Assume unset wilds have been handled.
 		local current = discard[#discard]
 		-- do we include wilds now or hunt later? Put them on the end?
 		-- a bad lookup is already nil so no need for or nil
-		if v[1] == current[1] or v[2] == current[2] or v[2] == 'z'  or v[2] == current[3] then
-			table.insert(playable)
+		if (v[1] == current[1]) or (v[2] == current[2]) or (v[2] == 'z') or (v[2] == current[3]) then
+			table.insert(playable, v)
 		end
 	end
+
 	table.sort(playable, DEFAULT_SORT)
-	-- if the first entry is a wild we gotta switch, can skip analysis
-	-- leave detection for the caller, idk if we've drawn yet
 	return playable
 end
 
+
 function run()
+	-- TODO need to handle initial wild
 while true do
+	local playable = can_play(turn)
+	-- LUA DOESN'T HAVE A CONTINUE UGH make this 2 deep and use break?
+	if #playable == 0 then
+		-- draw until that changes. append it to playable
+		-- if we get a wild we gotta run stats on the deck
+		cards = draw() -- the last one has to be playable, the rest are hand-appended
+		if cards == nil then
+			-- frick, game over
+			return
+		end
+		playable = {table.remove(cards)}
+		-- move everything LEFT in cards to the end of the hand
+		table.move(cards, 1, #cards, #players[turn].hand + 1, players[turn].hand)
+	end
 	
-end
-end
+	local played = '??'
+
+	if #playable == 1 then
+		-- just do it. if it's wild, we need to check our numbers
+		-- but a full analysis isn't really needed
+		if playable[1][2] ~= 'z' then
+			played = playable[1]
+		else
+			-- compute numbers, play a 3-code wild
+			nil
+		end
+	else
+		analyze(turn)
+		-- UGH FIGURE IT OUT
+	end
+	
+	play_card(played) -- cycle turns do whatever else is needed
+
+end end
 
 
 run()

@@ -44,6 +44,9 @@ Unset ToD wilds need a marker checked on before anything else.
 		* Priority for draw jumps IFF they are next
 			* wilddraw > draw? but what color to jump to?
 		* Priority for reverse jumps if the new order puts them at disadvantage
+3. Rummage through playable with advice
+	* may need to choose between wilds. wilddraw if punish else wilddraw with, say, 25-35% chance
+		* is a normal wild a skip? this changes logic if one isn't
 
 
 Color changes. How do they work?
