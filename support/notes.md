@@ -11,6 +11,8 @@ Sorting this way gives natural groupings for combos
 * 2x 1-9, skip, reverse, draw2 (per color)
 * 4x wild, wilddraw
 
+Wilds get a third character code on play representing their color.
+Unset ToD wilds need a marker checked on before anything else.
 
 ## Card Rankings
 * Numbers are neutral and boring
@@ -42,6 +44,16 @@ Sorting this way gives natural groupings for combos
 		* Priority for draw jumps IFF they are next
 			* wilddraw > draw? but what color to jump to?
 		* Priority for reverse jumps if the new order puts them at disadvantage
+
+
+Color changes. How do they work?
+* if you have an equal (and numerous) number of red and blue, changing to blue is 50/50?
+* what if you have 2x or 3x as many blue? Do you hold out or jump to the larger play space
+* what if there's one red left? do you play it, screwing yourself if it doesn't change, or jump, hoping to slip it in later?
+* color change factor? Colors are more likely to change with more players (then again I guess bots will make up 50% of all players at LEAST)
+	* strictly choosing to stay causes colors to swap less (of course this depends on individual hands, buuut)
+	* strictly jumping is chaotic
+	* are either of these even true? Hand makeup is complex.
 
 ## Misc
 * Draw till you can play?

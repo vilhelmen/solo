@@ -5,7 +5,18 @@ local table = require "table"
 
 math.randomseed(0) -- TODO: switch with appropriate playdate stuff, maybe a debug toggle as well
 
-local PANIC_THRESHOLD = 4  -- 4 or 3????
+local PANIC_THRESHOLD = 3  -- 4 or 3????
+
+DEFAULT_SORT = nil -- it just works
+function DISPLAY_SORT(a, b)
+	if a[2] < b[2] then
+		return true
+	elseif (a[2] == b[2]) then
+		return a[1] < b[1]
+	else
+		return false
+	end
+end
 
 print("Deck init")
 
@@ -35,7 +46,7 @@ function build_deck()
 	return deck
 end
 
-function shuffle_deck(deck)
+function shuffle(deck)
 	-- lua is pass by ref so this makes calling a little ugly.
 	-- Don't think there's a case where I should deepcopy or whatever
 	-- UGH fisher-yates is FINE
@@ -50,7 +61,7 @@ end
 
 local deck = build_deck()
 print(table.concat(deck,','))
-shuffle_deck(deck)
+shuffle(deck)
 print(table.concat(deck,','))
 
 local discard = {} -- TODO: playdate table create
@@ -62,19 +73,17 @@ for i = 1, 4 do
 end
 
 -- deal hands
-for _ = 1,7 do
+for _ = 1, 7 do
 	for i = 1, #players do
 		table.insert(players[i].hand, table.remove(deck))
 	end
 end
 for i = 1, #players do
-	table.sort(players[i].hand)
+	table.sort(players[i].hand, DEFAULT_SORT)
 end
-
 
 local turn = math.random(#players)
 local order = 1 -- -1 for reverse
-
 
 do
 	-- make wilddraw an illegal first card
@@ -137,28 +146,54 @@ function analyze(whoami)
 	for k, v in pairs(intel) do
 		if v.total == least_cards then
 			v.most_winning = true
+		end
 	end
 	-- sort by distance from us. we may need a mapping to total cards ordering... or just copy it
 	table.sort(intel, function(a, b) return a.distance < b.distance end)
-	
-	local panic = us_losing or not us_most_winning
-	local punish = intel[1].winning
-	local skip_override = false -- oh no don't skip into a landmine
-	local do_reverse = false -- mostly to get us out of a bad skip
-	if #intel >=2 then -- 3+ players
-		local triage = {}
-		for k,v in pairs(intel) do
-			table.insert(triage, {id=v.id, total=v.total, distance=v.distance,})
-		end
-		table.sort(triage, function(a, b) return a.total < b.total end)
+
+	local panic = us_losing or not us_most_winning -- we are, in fact, having a bad time
+	local do_punish = intel[1].winning -- attack - basically the same as skip if draw is skip
+	local do_skip = false -- attack
+	local do_reverse = false -- defend
+
+	if #intel >=2 then -- 3+ total players
+		-- local triage = {}
+		-- for k,v in pairs(intel) do
+		-- 	table.insert(triage, {id=v.id, total=v.total, distance=v.distance,})
+		-- end
+		-- table.sort(triage, function(a, b) return a.total < b.total end)
 		-- checking triage order may be best way to determine moves
-		skip_override = intel[2].winning
-		-- what if 1 and 2 are equally winning, or 1 is more winning than 2.
-		--  is one fewer winning player turns better?
-		-- what if 2 is more winning than 1
+		do_skip = intel[2].total > intel[1].total -- so long as we aren't skipping into a better player
+		do_reverse = intel[#intel].total > intel[1].total -- sure, if prev has more than next
+	else
+		do_skip = true -- always good
+		do_reverse = false -- at BEST it's not helpful... unless we make it a skip ;)
 	end
-	
-	
+	-- do we rummage through our playables now?
+end
+
+function draw(whoami)
+	-- draw until playable, checking deck exhaustion and maybe game end
+	nil
+end
+
+function can_play(whoami)
+	-- parse our hand and see what we can do, optionally draw? leave that for caller?
+	local playable = {}
+	for k, v = pairs(players[whoami].hand) do
+		-- same color, same symbol, wilds
+		-- Assume unset wilds have been handled.
+		local current = discard[#discard]
+		-- do we include wilds now or hunt later? Put them on the end?
+		-- a bad lookup is already nil so no need for or nil
+		if v[1] == current[1] or v[2] == current[2] or v[2] == 'z'  or v[2] == current[3] then
+			table.insert(playable)
+		end
+	end
+	table.sort(playable, DEFAULT_SORT)
+	-- if the first entry is a wild we gotta switch, can skip analysis
+	-- leave detection for the caller, idk if we've drawn yet
+	return playable
 end
 
 function run()
@@ -179,3 +214,5 @@ if first[1] == 'S' then
 elseif first[1] == 'R' then
 	order = order * -1
 end
+
+
