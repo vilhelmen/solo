@@ -18,7 +18,6 @@ local function DISPLAY_SORT(a, b)
 	end
 end
 
-print("Deck init")
 
 function build_deck()
 	local singles = {'0'} -- multiply by color
@@ -59,33 +58,47 @@ function shuffle(deck)
 	end
 end
 
-local deck = build_deck()
-print(table.concat(deck,','))
-shuffle(deck)
-print(table.concat(deck,','))
 
-local discard = {} -- TODO: playdate table create
--- just setting it to 4 for now
-local players = {} -- ^^
-for i = 1, 4 do
-	table.insert(players,{hand={};id=i})
-	-- id is some futureproofing. a function given a player can't tell who it is otherwise
-end
+ -- TODO: playdate table create in the appropriate places
+ -- I'm absolutely DISGUSTED I'm keeping these in this scope
+ --  this is what happens when you take away my objects, civility is gone
 
--- deal hands
-for _ = 1, 7 do
-	for i = 1, #players do
-		table.insert(players[i].hand, table.remove(deck))
+local deck = nil
+local discard = nil
+local players = nil
+
+function initialize(player_count)
+	-- boot everything for the primary loop
+	deck = build_deck()
+	print(table.concat(deck,',')) -- TODO: remove
+	shuffle(deck)
+	print(table.concat(deck,','))
+
+	discard = {} -- playdate table create!!
+	players = {} -- ^
+
+	-- Maybe there will be individual NPCs, track that in here
+	for i = 1, player_count do
+		table.insert(players,{hand={};id=i})
+		-- id is some futureproofing. a function given a player can't tell who it is otherwise
 	end
-end
-for i = 1, #players do
-	table.sort(players[i].hand, DEFAULT_SORT)
-end
 
-local turn = math.random(#players)
-local order = 1 -- -1 for reverse
+	-- deal hands
+	for _ = 1, 7 do
+		for i = 1, #players do
+			table.insert(players[i].hand, table.remove(deck))
+		end
+	end
+	-- actually idk if I ever really need to do this
+	--  no functions are gonna be optimized to take advantage of a sorted order
+	-- TODO: remove
+	for i = 1, #players do
+		table.sort(players[i].hand, DEFAULT_SORT)
+	end
 
-do
+	local turn = math.random(#players)
+	local order = 1 -- -1 for reverse
+
 	-- make wilddraw an illegal first card
 	local first = table.remove(deck)
 	while first == 'Xz' do
@@ -97,6 +110,7 @@ do
 	-- this lets us play it using regular flow for rendering
 	table.insert(deck, first)
 end
+
 
 -- UHHHHH stomp over the card code if it's wild and the color has been selected?
 -- but then you need to remember to reset it
@@ -173,6 +187,8 @@ function analyze(whoami)
 end
 
 
+-- directly place cards in hand? Last is first playable?
+-- accept argument for multidraw?
 function draw(whoami)
 	-- draw until playable, checking deck exhaustion and maybe game end
 	-- return set of drawn cards, final one should be playable. Nil if game over
@@ -184,6 +200,7 @@ end
 function can_play(whoami)
 	-- Figure out what we can play. Wilds go to the back (read, if top is z you have no choice)
 	local playable = {}
+	local mask = {}
 
 	for k, v in pairs(players[whoami].hand) do
 		-- same color, same symbol, owned wilds, color matching played wild
@@ -191,65 +208,90 @@ function can_play(whoami)
 		local current = discard[#discard]
 		-- do we include wilds now or hunt later? Put them on the end?
 		-- a bad lookup is already nil so no need for or nil
+		-- an uncoded wild will flag everything as valid
 		if (v[1] == current[1]) or (v[2] == current[2]) or (v[2] == 'z') or (v[2] == current[3]) then
 			table.insert(playable, v)
+			table.inset(mask, true)
+		else
+			table.inset(mask, false)
 		end
 	end
 
 	table.sort(playable, DEFAULT_SORT)
-	return playable
+	return playable, mask
 end
 
 
+function play_card(card)
+	-- uhhhhhhhh I guess we know what turn it is, globally...........
+	-- Expect 3-code wilds
+	-- blank 3-codes after they are played over
+	-- remove card from hand
+	-- return true, winner_id on win detection
+	-- Apply draw/skip/etc
+	return false -- check if nil is needed
+end
+
+
+
 function run()
-	-- TODO need to handle initial wild
+	initialize(4)
+	-- TODO need to handle initial wild (do I? it may all be handled now)
+	local played = nil
+
 while true do
-	local playable = can_play(turn)
+	played = '??'
+	-- playable list is good for bots, mask is good for user
+	local playable, mask = can_play(turn)
 	-- LUA DOESN'T HAVE A CONTINUE UGH make this 2 deep and use break?
 	if #playable == 0 then
 		-- draw until that changes. append it to playable
 		-- if we get a wild we gotta run stats on the deck
 		cards = draw() -- the last one has to be playable, the rest are hand-appended
 		if cards == nil then
-			-- frick, game over
+			-- frick, game over. Need to id the winner.
+			-- OH NO THIS IS ALL MESSED UP
+			-- FIGURE OUT IF PLAY_CARD HANDLES DRAWS AS WELL
 			return
 		end
 		playable = {table.remove(cards)}
 		-- move everything LEFT in cards to the end of the hand
 		table.move(cards, 1, #cards, #players[turn].hand + 1, players[turn].hand)
+		-- need to update player mask??
+		-- put this all back in bot logic?
 	end
-	
-	local played = '??'
 
-	if #playable == 1 then
-		-- just do it. if it's wild, we need to check our numbers
-		-- but a full analysis isn't really needed
-		if playable[1][2] ~= 'z' then
-			played = playable[1]
+	if turn ~= 1 then
+		if #playable == 1 then
+			-- just do it. if it's wild, we need to check our numbers
+			-- but a full analysis isn't really needed
+			if playable[1][2] ~= 'z' then
+				played = playable[1]
+			else
+				-- compute density numbers, play a 3-code wild
+				-- uh-oh, a 3 code won't line up with the hand for removal, has to be handled
+				-- remove card from hand by play_card?
+			end
 		else
-			-- compute numbers, play a 3-code wild
-			nil
+			analyze(turn)
+			-- TODO: UGH FIGURE IT OUT
 		end
 	else
-		analyze(turn)
-		-- UGH FIGURE IT OUT
+		-- player is human
+		-- run a copy of can_play, have it be a mask?
+		-- or just check the cards live
+		-- but a mask could let you highlight cards
+		-- like, playable cards are bumped up a quarter
+		-- or is that too "easy"? hand holdy?
 	end
 	
-	play_card(played) -- cycle turns do whatever else is needed
+	-- cycle turns do whatever else is needed, or halt and return true
+	-- return winner number OR zero?
+	local game_over, winner = play_card(played)
 
 end end
 
 
+
 run()
-
-
-
-
-if first[1] == 'S' then
-	-- shift to 0-base, apply rotation, then shift back ;)
-	turn = (((turn - 1) + order) % 4) + 1
-elseif first[1] == 'R' then
-	order = order * -1
-end
-
 
