@@ -187,7 +187,7 @@ function analyze(whoami)
 end
 
 
-function can_play(whoami)
+function get_playable(whoami)
 	-- Figure out what we can play. Wilds go to the back (read, if top is z you have no choice)
 	local playable = {}
 	local mask = {}
@@ -210,7 +210,7 @@ end
 function play_card(card)
 	-- uhhhhhhhh I guess we know what turn it is, globally...........
 	-- Expect 3-code wilds
-	-- blank 3-codes after they are played over
+	-- blank 3-codes after they are played over (ensure 3code cleared before any draws)
 	-- remove card from hand
 	-- return true, winner_id on win detection
 	-- Apply draw/skip/etc
@@ -281,14 +281,20 @@ end
 function get_color_stats(whoami)
 	-- literally only have z so I can loop without it exploding, delete it after
 	-- also the "official" color listing is trapped in init. z isn't in it anyway
-	-- if I keep a pair with count and color then I can't index right without a second mapping
+	-- if I keep a pair with count and color then I can't index via color code without a second mapping
 	-- UGH IF I USE THE COLOR AS THE KEY I CAN'T SORT IT DIRECTLY THIS SUCKS
-	local colors = {r=0, g=0, b=0, y=0, z=0}
-	local sorted = {}
-	for k,v in pairs(players[whoami]) do
+	local colors = {
+		{count=0,color='r'}; {count=0,color='b'};
+		{count=0,color='g'}; {count=0,color='y'}; {count=0,color='z'}}
+	local map = {r=1, b=2, g=3, y=4, z=5}
+	for k, v in pairs(players[whoami]) do
 		-- TODO: playdate has a +=, use it?
-		colors[v[2]] = colors[v[2]] + 1
+		colors[map[v[2]]].count = colors[map[v[2]]].count + 1
 	end
+	colors[5] = nil -- BEGONE Z. WIll I regret this? Who knows!
+	table.sort(colors, function(a, b) return a.count > b.count end)
+	
+	return colors
 end
 
 -- function force_draw(whoami, count)
@@ -304,7 +310,7 @@ while true do
 	played = '??'
 
 	-- playable list is good for bots, mask is good for user
-	local playable, mask = can_play(turn)
+	local playable, mask = get_playable(turn)
 
 	if turn ~= 1 then
 		-- LUA DOESN'T HAVE A CONTINUE UGH make this 2 deep and use break?
@@ -331,8 +337,9 @@ while true do
 				played = playable[1]
 			else
 				-- compute density numbers, play a 3-code wild
-				-- uh-oh, a 3 code won't line up with the hand for removal, has to be handled
-				-- remove card from hand by play_card?
+				-- TODO: pick second or third with density-based odds?
+				local color_density = get_color_stats(turn)
+				played = playable[1] .. color_density[1].color
 			end
 		else
 			analyze(turn)
@@ -340,7 +347,7 @@ while true do
 		end
 	else
 		-- player is human
-		-- run a copy of can_play, have it be a mask?
+		-- run a copy of get_playable, have it be a mask?
 		-- or just check the cards live
 		-- but a mask could let you highlight cards
 		-- like, playable cards are bumped up a quarter
