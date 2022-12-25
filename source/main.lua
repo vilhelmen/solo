@@ -214,6 +214,28 @@ function play_card(card)
 	-- remove card from hand
 	-- return true, winner_id on win detection
 	-- Apply draw/skip/etc
+	
+	-- place ToD
+	table.inset(discard, card)
+	-- Strip any 3codes
+	discard[#discard - 1] = string.sub(discard[#discard - 1], 1, 2)
+	card = string.sub(card, 1, 2)
+	--remove from hand. if it's not in there, congrats you played a card that didn't exist and got away with it
+	for i = 1, #players[turn].hand do
+		if #players[turn].hand[i] == card then
+			table.remove(players[turn].hand, i)
+			break
+		end
+	end
+	
+	-- only the playing person can win right now
+	if #players[turn].hand == 0 then
+		return true, turn
+	end
+	
+	-- apply draw/skip/etc
+	-- technically anyone can win when applying a draw
+	-- I seem to have misplaced my turn cycling code
 	return false -- check if nil is needed
 end
 
@@ -323,8 +345,8 @@ while true do
 				return
 			end
 			-- IDK!? Leave card in hand, have play_card remove from hand?
-			playable = {table.remove(cards)}
-			-- move everything LEFT in cards to the end of the hand
+			playable = {cards[#cards]}
+			-- move everything in cards to the end of the hand
 			table.move(cards, 1, #cards, #players[turn].hand + 1, players[turn].hand)
 			-- need to update player mask??
 			-- put this all back in bot logic?
