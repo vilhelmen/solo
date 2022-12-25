@@ -187,29 +187,13 @@ function analyze(whoami)
 end
 
 
--- directly place cards in hand? Last is first playable?
--- accept argument for multidraw?
-function draw(whoami)
-	-- draw until playable, checking deck exhaustion and maybe game end
-	-- return set of drawn cards, final one should be playable. Nil if game over
-	-- !!!!!! make sure any wild drawn isn't a 3code
-	--  which is to say be sure to purge 3codes on discard shuffle
-	nil
-end
-
 function can_play(whoami)
 	-- Figure out what we can play. Wilds go to the back (read, if top is z you have no choice)
 	local playable = {}
 	local mask = {}
 
 	for k, v in pairs(players[whoami].hand) do
-		-- same color, same symbol, owned wilds, color matching played wild
-		-- Assume unset wilds have been handled.
-		local current = discard[#discard]
-		-- do we include wilds now or hunt later? Put them on the end?
-		-- a bad lookup is already nil so no need for or nil
-		-- an uncoded wild will flag everything as valid
-		if (v[1] == current[1]) or (v[2] == current[2]) or (v[2] == 'z') or (v[2] == current[3]) then
+		if is_playable(v) then
 			table.insert(playable, v)
 			table.inset(mask, true)
 		else
@@ -217,6 +201,7 @@ function can_play(whoami)
 		end
 	end
 
+	-- put wilds at the end
 	table.sort(playable, DEFAULT_SORT)
 	return playable, mask
 end
@@ -233,6 +218,82 @@ function play_card(card)
 end
 
 
+function draw()
+	-- draw dingle card
+	-- replenishes deck
+	-- can end game
+	-- returns card code or nil if game over
+
+	-- in theory, deck exhaustion doesn't have to be game over if no one ever draws again
+	-- refill before return, so if it's empty now, you're out
+	if #deck > 1 then
+		return table.remove(deck)
+	elseif #deck == 1 then
+		local hold = table.remove(deck)
+		local tod = table.remove(discard)
+		-- well, if the discard is empty this will all no-op
+		shuffle(discard)
+		table.move(discard, 1, #discard, 1, deck)
+		table.insert(discard, tod)
+		return hold
+	else
+		return nil
+	end
+end
+
+function is_playable(card)
+	-- same color, same symbol, owned wilds, color matching played wild
+	-- a bad lookup is already nil so no need for or nil
+	-- an uncoded wild will flag everything as valid
+	
+	-- what's the performance penalty if 4 lookups/lens
+	-- but also lol who cares
+	-- kinda ugly when called in a loop
+	local current = discard[#discard]
+	if (card[2] == current[2]) or (card[1] == current[1]) or (card[2] == 'z') or (card[2] == current[3]) then
+		return true
+	else
+		return false
+	end
+end
+
+function draw_playable()
+	-- draw until playable is found
+	-- can end game
+	-- returns playable, stack
+	-- last card in stack is playable
+	-- if playable is false, it's game over
+	local drawn = {} -- in theory the maximum is n-3 (tod and one in each player)
+	while true do
+		-- if I just pushback draw() I might get stuck pushing nil
+		local new = draw()
+		if new == nil then
+			return false, drawn
+		end
+		table.inset(drawn, new)
+		if is_playable(new) then
+			return true, drawn
+		end
+	end
+end
+
+-- remove whoami?
+function get_color_stats(whoami)
+	-- literally only have z so I can loop without it exploding, delete it after
+	-- also the "official" color listing is trapped in init. z isn't in it anyway
+	-- if I keep a pair with count and color then I can't index right without a second mapping
+	-- UGH IF I USE THE COLOR AS THE KEY I CAN'T SORT IT DIRECTLY THIS SUCKS
+	local colors = {r=0, g=0, b=0, y=0, z=0}
+	local sorted = {}
+	for k,v in pairs(players[whoami]) do
+		-- TODO: playdate has a +=, use it?
+		colors[v[2]] = colors[v[2]] + 1
+	end
+end
+
+-- function force_draw(whoami, count)
+-- 	
+-- end
 
 function run()
 	initialize(4)
@@ -241,27 +302,28 @@ function run()
 
 while true do
 	played = '??'
+
 	-- playable list is good for bots, mask is good for user
 	local playable, mask = can_play(turn)
-	-- LUA DOESN'T HAVE A CONTINUE UGH make this 2 deep and use break?
-	if #playable == 0 then
-		-- draw until that changes. append it to playable
-		-- if we get a wild we gotta run stats on the deck
-		cards = draw() -- the last one has to be playable, the rest are hand-appended
-		if cards == nil then
-			-- frick, game over. Need to id the winner.
-			-- OH NO THIS IS ALL MESSED UP
-			-- FIGURE OUT IF PLAY_CARD HANDLES DRAWS AS WELL
-			return
-		end
-		playable = {table.remove(cards)}
-		-- move everything LEFT in cards to the end of the hand
-		table.move(cards, 1, #cards, #players[turn].hand + 1, players[turn].hand)
-		-- need to update player mask??
-		-- put this all back in bot logic?
-	end
 
 	if turn ~= 1 then
+		-- LUA DOESN'T HAVE A CONTINUE UGH make this 2 deep and use break?
+		if #playable == 0 then
+			-- draw until that changes. append it to playable
+			-- if we get a wild we gotta run stats on the deck
+			local ok, cards = draw_playable() -- the last one has to be playable, the rest are hand-appended
+			if not ok then
+				-- GAME OVER IDK MAN
+				return
+			end
+			-- IDK!? Leave card in hand, have play_card remove from hand?
+			playable = {table.remove(cards)}
+			-- move everything LEFT in cards to the end of the hand
+			table.move(cards, 1, #cards, #players[turn].hand + 1, players[turn].hand)
+			-- need to update player mask??
+			-- put this all back in bot logic?
+		end
+
 		if #playable == 1 then
 			-- just do it. if it's wild, we need to check our numbers
 			-- but a full analysis isn't really needed
