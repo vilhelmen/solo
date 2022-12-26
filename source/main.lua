@@ -233,9 +233,41 @@ function play_card(card)
 		return true, turn
 	end
 	
-	-- apply draw/skip/etc
+	-- order should be
+	-- reverse
+	-- turn cycle
+	-- force draw
+	-- skip apply
 	-- technically anyone can win when applying a draw
-	-- I seem to have misplaced my turn cycling code
+	if card[1] == 'R' then
+		order = order * -1
+	end
+
+	turn = (((turn - 1) + order) % #players) + 1
+
+	local to_draw = 0
+	local drawn = {}
+	if card[1] == 'D' then
+		to_draw = 2
+	elseif card[1] == '+' then
+		to_draw = 4
+	end
+	for i = 1, to_draw do
+		-- whatever, I can check a nil later
+		table.inset(drawn, draw())
+	end
+	if #drawn ~= to_draw then
+		-- FRICK, exhaustion, GAME OVER MAN, GAME OVER
+		-- but we don't know who
+		-- ORRRRRRR do we get lazy and change to return to not indicate and make someone else rummage through the hands
+		-- this isn't the only point where the game can end
+	end
+
+	if card[1] == 'S'  or card[1] == 'D' or card[1] == '+' then -- not all Z, just +
+		-- shift to 0-base, apply rotation, then shift back ;)
+		turn = (((turn - 1) + order) % #players) + 1
+	end
+
 	return false -- check if nil is needed
 end
 
