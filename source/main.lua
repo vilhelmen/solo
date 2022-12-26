@@ -206,14 +206,32 @@ function get_playable(whoami)
 	return playable, mask
 end
 
+function find_winner()
+	-- deck exhaustion is ambiguous and there could be a tie
+	local min_hand = #players[1].hand
+	for i = 2, #players do
+		if #players[i].hand < min_hand then
+			min_hand = #players[i].hand
+		end
+	end
+	local winners = {}
+	for i = 1, #players do
+		if #players[i].hand == min_hand then
+			table.insert(winners, i)
+		end
+	end
+	
+	return winners
+end
+
 
 function play_card(card)
 	-- uhhhhhhhh I guess we know what turn it is, globally...........
 	-- Expect 3-code wilds
 	-- blank 3-codes after they are played over (ensure 3code cleared before any draws)
 	-- remove card from hand
-	-- return true, winner_id on win detection
 	-- Apply draw/skip/etc
+	-- returns winner vector or nil
 	
 	-- place ToD
 	table.inset(discard, card)
@@ -230,7 +248,7 @@ function play_card(card)
 	
 	-- only the playing person can win right now
 	if #players[turn].hand == 0 then
-		return true, turn
+		return {turn}
 	end
 	
 	-- order should be
@@ -238,7 +256,7 @@ function play_card(card)
 	-- turn cycle
 	-- force draw
 	-- skip apply
-	-- technically anyone can win when applying a draw
+	--  technically anyone can win when applying a draw
 	if card[1] == 'R' then
 		order = order * -1
 	end
@@ -252,15 +270,17 @@ function play_card(card)
 	elseif card[1] == '+' then
 		to_draw = 4
 	end
-	for i = 1, to_draw do
-		-- whatever, I can check a nil later
-		table.inset(drawn, draw())
-	end
-	if #drawn ~= to_draw then
-		-- FRICK, exhaustion, GAME OVER MAN, GAME OVER
-		-- but we don't know who
-		-- ORRRRRRR do we get lazy and change to return to not indicate and make someone else rummage through the hands
-		-- this isn't the only point where the game can end
+	if to_draw ~= 0 then
+		for i = 1, to_draw do
+			-- whatever, I can check a nil later
+			table.inset(drawn, draw())
+		end
+		if #drawn ~= to_draw then
+			-- FRICK, exhaustion, GAME OVER MAN, GAME OVER
+			return find_winner()
+		else
+			table.move(drawn, 1, #drawn, #players[turn].hand + 1, players[turn].hand)
+		end
 	end
 
 	if card[1] == 'S'  or card[1] == 'D' or card[1] == '+' then -- not all Z, just +
@@ -268,7 +288,7 @@ function play_card(card)
 		turn = (((turn - 1) + order) % #players) + 1
 	end
 
-	return false -- check if nil is needed
+	return nil -- do I have to explicitly return nil?
 end
 
 
@@ -373,8 +393,7 @@ while true do
 			-- if we get a wild we gotta run stats on the deck
 			local ok, cards = draw_playable() -- the last one has to be playable, the rest are hand-appended
 			if not ok then
-				-- GAME OVER IDK MAN
-				return
+				return find_winner()
 			end
 			-- IDK!? Leave card in hand, have play_card remove from hand?
 			playable = {cards[#cards]}
