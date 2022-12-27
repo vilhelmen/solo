@@ -187,14 +187,19 @@ function analyze(whoami)
 end
 
 
-function get_playable(whoami)
-	-- Figure out what we can play. Wilds go to the back (read, if top is z you have no choice)
+function get_playable()
+	-- returns list of playable cards (deduplicated), and boolean hand mask
+	-- Wilds go to the back (read, if top is z you have no choice)
+	local singles = {}
 	local playable = {}
 	local mask = {}
 
-	for k, v in pairs(players[whoami].hand) do
+	for k, v in pairs(players[turn].hand) do
 		if is_playable(v) then
-			table.insert(playable, v)
+			if singles[v] == nil then
+				table.insert(playable, v)
+			end
+			singles[v] = true -- why branch to do this
 			table.inset(mask, true)
 		else
 			table.inset(mask, false)
@@ -351,8 +356,7 @@ function draw_playable()
 	end
 end
 
--- remove whoami?
-function get_color_stats(whoami)
+function get_color_stats()
 	-- literally only have z so I can loop without it exploding, delete it after
 	-- also the "official" color listing is trapped in init. z isn't in it anyway
 	-- if I keep a pair with count and color then I can't index via color code without a second mapping
@@ -361,13 +365,13 @@ function get_color_stats(whoami)
 		{count=0,color='r'}; {count=0,color='b'};
 		{count=0,color='g'}; {count=0,color='y'}; {count=0,color='z'}}
 	local map = {r=1, b=2, g=3, y=4, z=5}
-	for k, v in pairs(players[whoami]) do
+	for k, v in pairs(players[turn]) do
 		-- TODO: playdate has a +=, use it?
 		colors[map[v[2]]].count = colors[map[v[2]]].count + 1
 	end
-	colors[5] = nil -- BEGONE Z. WIll I regret this? Who knows!
+	colors[5] = nil -- BEGONE Z. Will I regret this? Who knows!
 	table.sort(colors, function(a, b) return a.count > b.count end)
-	
+
 	return colors
 end
 
@@ -375,8 +379,8 @@ end
 -- 	
 -- end
 
-function run()
-	initialize(4)
+function run(n)
+	initialize(n)
 	-- TODO need to handle initial wild (do I? it may all be handled now)
 	local played = nil
 
@@ -384,10 +388,14 @@ while true do
 	played = '??'
 
 	-- playable list is good for bots, mask is good for user
-	local playable, mask = get_playable(turn)
+	local playable, mask = get_playable()
+
+	-- a forced draw play needs to be figured out
+	--  two copies, one for bots one for people, sucks
+	--  but a forced play reaches awfully deep into both
+	--  and it has to render different for the player
 
 	if turn ~= 1 then
-		-- LUA DOESN'T HAVE A CONTINUE UGH make this 2 deep and use break?
 		if #playable == 0 then
 			-- draw until that changes. append it to playable
 			-- if we get a wild we gotta run stats on the deck
@@ -399,8 +407,6 @@ while true do
 			playable = {cards[#cards]}
 			-- move everything in cards to the end of the hand
 			table.move(cards, 1, #cards, #players[turn].hand + 1, players[turn].hand)
-			-- need to update player mask??
-			-- put this all back in bot logic?
 		end
 
 		if #playable == 1 then
@@ -411,7 +417,7 @@ while true do
 			else
 				-- compute density numbers, play a 3-code wild
 				-- TODO: pick second or third with density-based odds?
-				local color_density = get_color_stats(turn)
+				local color_density = get_color_stats()
 				played = playable[1] .. color_density[1].color
 			end
 		else
@@ -429,11 +435,11 @@ while true do
 	
 	-- cycle turns do whatever else is needed, or halt and return true
 	-- return winner number OR zero?
-	local game_over, winner = play_card(played)
+	local winner = play_card(played)
 
 end end
 
 
 
-run()
+run(4)
 
