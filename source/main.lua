@@ -8,11 +8,15 @@ math.randomseed(0) -- TODO: switch with appropriate playdate stuff, maybe a debu
 local PANIC_THRESHOLD = 3  -- 4 or 3????
 
 local DEFAULT_SORT = nil -- it just works
+-- fix color ordering with a map?
+--  alphabetical would be uhhhhhhhhhh b g r y
+--  ........ but also we don't have a color display
+--  colors are just, like, your opinion, man
 local function DISPLAY_SORT(a, b)
-	if a[2] < b[2] then
+	if a:sub(2) < b:sub(2) then
 		return true
-	elseif (a[2] == b[2]) then
-		return a[1] < b[1]
+	elseif (a:sub(2) == b:sub(2)) then
+		return a:sub(1) < b:sub(1)
 	else
 		return false
 	end
@@ -66,6 +70,8 @@ end
 local deck = nil
 local discard = nil
 local players = nil
+local turn = nil
+local order = nil
 
 function initialize(player_count)
 	-- boot everything for the primary loop
@@ -96,8 +102,8 @@ function initialize(player_count)
 		table.sort(players[i].hand, DEFAULT_SORT)
 	end
 
-	local turn = math.random(#players)
-	local order = 1 -- -1 for reverse
+	turn = math.random(#players)
+	order = 1 -- -1 for reverse
 
 	-- make wilddraw an illegal first card
 	local first = table.remove(deck)
@@ -106,9 +112,8 @@ function initialize(player_count)
 		table.insert(deck, math.random(#deck - 1), first)
 		first = table.remove(deck)
 	end
-	-- moving first card to top deck instead of top of discard
-	-- this lets us play it using regular flow for rendering
-	table.insert(deck, first)
+
+	table.insert(discard, first)
 end
 
 
@@ -141,7 +146,7 @@ function analyze(whoami)
 	for i = 1, #players do
 		if i ~= whoami then
 			-- thankfully our data on other players is VERY limited
-			table.inset(intel, {
+			table.insert(intel, {
 				winning=#players[i].hand <= PANIC_THRESHOLD,
 				most_winning=false, -- touch up after the fact
 				total=#players[i].hand, -- ugh I'll need it for nuance
@@ -186,7 +191,6 @@ function analyze(whoami)
 	-- do we rummage through our playables now?
 end
 
-
 function get_playable()
 	-- returns list of playable cards (deduplicated), and boolean hand mask
 	-- Wilds go to the back (read, if top is z you have no choice)
@@ -200,9 +204,9 @@ function get_playable()
 				table.insert(playable, v)
 			end
 			singles[v] = true -- why branch to do this
-			table.inset(mask, true)
+			table.insert(mask, true)
 		else
-			table.inset(mask, false)
+			table.insert(mask, false)
 		end
 	end
 
@@ -239,7 +243,7 @@ function play_card(card)
 	-- returns winner vector or nil
 	
 	-- place ToD
-	table.inset(discard, card)
+	table.insert(discard, card)
 	-- Strip any 3codes
 	discard[#discard - 1] = string.sub(discard[#discard - 1], 1, 2)
 	card = string.sub(card, 1, 2)
@@ -262,7 +266,7 @@ function play_card(card)
 	-- force draw
 	-- skip apply
 	--  technically anyone can win when applying a draw
-	if card[1] == 'R' then
+	if card:sub(1) == 'R' then
 		order = order * -1
 	end
 
@@ -270,15 +274,15 @@ function play_card(card)
 
 	local to_draw = 0
 	local drawn = {}
-	if card[1] == 'D' then
+	if card:sub(1) == 'D' then
 		to_draw = 2
-	elseif card[1] == '+' then
+	elseif card:sub(1) == '+' then
 		to_draw = 4
 	end
 	if to_draw ~= 0 then
 		for i = 1, to_draw do
 			-- whatever, I can check a nil later
-			table.inset(drawn, draw())
+			table.insert(drawn, draw())
 		end
 		if #drawn ~= to_draw then
 			-- FRICK, exhaustion, GAME OVER MAN, GAME OVER
@@ -288,7 +292,7 @@ function play_card(card)
 		end
 	end
 
-	if card[1] == 'S'  or card[1] == 'D' or card[1] == '+' then -- not all Z, just +
+	if card:sub(1) == 'S' or card:sub(1) == 'D' or card:sub(1) == '+' then -- not all Z, just +
 		-- shift to 0-base, apply rotation, then shift back ;)
 		turn = (((turn - 1) + order) % #players) + 1
 	end
@@ -329,30 +333,11 @@ function is_playable(card)
 	-- but also lol who cares
 	-- kinda ugly when called in a loop
 	local current = discard[#discard]
-	if (card[2] == current[2]) or (card[1] == current[1]) or (card[2] == 'z') or (card[2] == current[3]) then
+	if (card:sub(2) == current:sub(2)) or (card:sub(1) == current:sub(1)) or
+			(card:sub(2) == 'z') or (card:sub(2) == current:sub(3)) then
 		return true
 	else
 		return false
-	end
-end
-
-function draw_playable()
-	-- draw until playable is found
-	-- can end game
-	-- returns playable, stack
-	-- last card in stack is playable
-	-- if playable is false, it's game over
-	local drawn = {} -- in theory the maximum is n-3 (tod and one in each player)
-	while true do
-		-- if I just pushback draw() I might get stuck pushing nil
-		local new = draw()
-		if new == nil then
-			return false, drawn
-		end
-		table.inset(drawn, new)
-		if is_playable(new) then
-			return true, drawn
-		end
 	end
 end
 
@@ -365,54 +350,69 @@ function get_color_stats()
 		{count=0,color='r'}; {count=0,color='b'};
 		{count=0,color='g'}; {count=0,color='y'}; {count=0,color='z'}}
 	local map = {r=1, b=2, g=3, y=4, z=5}
-	for k, v in pairs(players[turn]) do
+	for k, v in pairs(players[turn].hand) do
 		-- TODO: playdate has a +=, use it?
-		colors[map[v[2]]].count = colors[map[v[2]]].count + 1
+		-- omg you can't index a string
+		colors[map[v:sub(2)]].count = colors[map[v:sub(2)]].count + 1
 	end
 	colors[5] = nil -- BEGONE Z. Will I regret this? Who knows!
 	table.sort(colors, function(a, b) return a.count > b.count end)
 
+	-- OH BABY SINCE THEy'RE NOT NUMBERS I CAN HIDE THE DIRECT COUNTS
+	for i = 1, 4 do
+		colors[colors[i].color] = colors[i].count
+	end
+
 	return colors
 end
 
--- function force_draw(whoami, count)
--- 	
--- end
+function draw_playable()
+	-- draw until that changes. append it to playable
+	-- returns card or nil on exhaust
+	while true do
+		local card = draw()
+		-- is_playable can't handle nil probably
+		-- and I kinda don't want to add support because that's gonna be a busy function
+		if draw == nil then
+			-- please, I just want to raise
+			return nil
+		end
+		table.append(players[turn].hand, card)
+		if is_playable(card) then
+			break
+		end
+	end
+	return card
+end
 
 function run(n)
 	initialize(n)
-	-- TODO need to handle initial wild (do I? it may all be handled now)
-	local played = nil
+	-- FIXME: debug stuff, skip player
+	turn = 2
+	dump()
+	-- TODO check initial wild (should be secretly handled by get_playable)
 
 while true do
-	played = '??'
+	local played, forced_play = '??', false
 
 	-- playable list is good for bots, mask is good for user
 	local playable, mask = get_playable()
 
-	-- a forced draw play needs to be figured out
-	--  two copies, one for bots one for people, sucks
-	--  but a forced play reaches awfully deep into both
-	--  and it has to render different for the player
+	if #playable == 0 then
+		-- playable and mask are now garbage
+		local drawn = draw_playable()
+		forced_play = true
+		if played == nil then
+			return find_winner()
+		end
+		playable = {drawn}
+	end
 
 	if turn ~= 1 then
-		if #playable == 0 then
-			-- draw until that changes. append it to playable
-			-- if we get a wild we gotta run stats on the deck
-			local ok, cards = draw_playable() -- the last one has to be playable, the rest are hand-appended
-			if not ok then
-				return find_winner()
-			end
-			-- IDK!? Leave card in hand, have play_card remove from hand?
-			playable = {cards[#cards]}
-			-- move everything in cards to the end of the hand
-			table.move(cards, 1, #cards, #players[turn].hand + 1, players[turn].hand)
-		end
-
 		if #playable == 1 then
 			-- just do it. if it's wild, we need to check our numbers
 			-- but a full analysis isn't really needed
-			if playable[1][2] ~= 'z' then
+			if playable[1]:sub(2) ~= 'z' then
 				played = playable[1]
 			else
 				-- compute density numbers, play a 3-code wild
@@ -436,10 +436,12 @@ while true do
 	-- cycle turns do whatever else is needed, or halt and return true
 	-- return winner number OR zero?
 	local winner = play_card(played)
+	if not winner == nil then
+		return winner
+	end
 
 end end
 
 
-
-run(4)
-
+print(run(4))
+-- require "croissant.debugger"()
