@@ -128,48 +128,45 @@ local function is_special(card)
 end
 
 
-local function categorize_playable(playable)
+local function get_color_stats(card_pile)
 	-- returns playable color breakdown and available color total
 	-- reminder that playable is deduplicated
 	local color_log = { -- no need for special if we have the flags?
-		r={normal={}, special={}, D=false, R=false, S=false};
-		g={normal={}, special={}, D=false, R=false, S=false};
-		b={normal={}, special={}, D=false, R=false, S=false};
-		y={normal={}, special={}, D=false, R=false, S=false};
-		z={normal={}, special={}, W=false, X=false}
-	}
-	local color_total = 0
-
-	-- wildstart should have marked all as playable
+		{normal={}, special={}, D=false, R=false, S=false, color='r', total=0};
+		{normal={}, special={}, D=false, R=false, S=false, color='g', total=0};
+		{normal={}, special={}, D=false, R=false, S=false, color='b', total=0};
+		{normal={}, special={}, D=false, R=false, S=false, color='y', total=0};
+		{normal={}, special={}, W=false, X=false, color='z', total=0}
+	} -- z normal list for easier processing
+	local index_map = {r=1, g=2, b=3, y=4, z=5}
 
 	-- ok, big brain time.
 	-- a foreign color can only be hand-dominant iff ...?
 	--  we have none of the current color (we can really only have one of a foreign color, playable is deduped)
 	--  current card is a wildstart -- technically no color is foreign?
 
-	for _, v in pairs(playable) do
-		if is_normal(v) then
-			-- no z is normal
-			table.append(color_log[v:sub(1)].normal, v)
+	for _, v in pairs(card_pile) do
+		if is_normal(v) then -- no z is normal
+			table.append(color_log[index_map[v:sub(2)]].normal, v)
 		else
-			table.append(color_log[v:sub(1)].special, v)
-			color_log[v:sub(2)][v:sub(1)] = true
+			table.append(color_log[index_map[v:sub(2)]].special, v)
+			color_log[index_map[v:sub(1)]][v:sub(1)] = true
 		end
+		color_log[index_map[v:sub(2)]].total = color_log[index_map[v:sub(2)]].total + 1
 	end
 
-	-- discard blank entries (will i regret this?)
-	-- is adding sorted numerical order useful?
-	-- it's mostly just notable for existing for foreign colors
-	-- color_stats are needed for full color consideration
-	-- UGH NO LENGTH DATA
-	for v in {'r', 'g', 'b', 'y', 'z'} do
-		if (color_log[v].normal + color_log[v].special) == 0 then
-			color_log[v] = nil
-		else
-			color_total = color_total + 1
-		end
+	-- pruning post-sort because I'm a terrible person
+	table.sort(color_log, function(a, b) return a.total < b.total end)
+	while color_log[#color_log].total == 0 do
+		table.remove(color_log)
 	end
-	return color_log, color_total
+
+	index_map = {}
+	for i = 1, #color_log do
+		index_map[color_log[i].color] = i
+	end
+
+	return color_log, index_map
 end
 
 -- UHHHHH stomp over the card code if it's wild and the color has been selected?
@@ -184,37 +181,6 @@ local function dump()
 	for i = 1, #players do
 		print('', i, table.concat(players[i].hand, ','))
 	end
-end
-
-
-local function get_color_stats()
-	-- literally only have z so I can loop without it exploding, delete it after
-	-- also the "official" color listing is trapped in init. z isn't in it anyway
-	-- if I keep a pair with count and color then I can't index via color code without a second mapping
-	-- UGH IF I USE THE COLOR AS THE KEY I CAN'T SORT IT DIRECTLY THIS SUCKS
-	local colors = {
-		{count=0, color='r'}; {count=0, color='b'};
-		{count=0, color='g'}; {count=0, color='y'}; {count=0, color='z'}}
-	local map = {r=1, b=2, g=3, y=4, z=5}
-	for _, v in pairs(players[turn].hand) do
-		-- TODO: playdate has a +=, use it?
-		-- omg you can't index a string
-		colors[map[v:sub(2)]].count = colors[map[v:sub(2)]].count + 1
-	end
-	table.sort(colors, function(a, b) return a.count > b.count end)
-
-	-- toss empty colors
-	while colors[#colors].count == 0 do
-		table.remove(colors)
-	end
-
-	-- OH BABY SINCE THEY'RE NOT NUMBERS I CAN HIDE THE DIRECT COUNTS
-	-- OH NO THIS IS EXPOSED VIA PAIRS, IS THAT BAD?
-	for i = 1, #colors do
-		colors[colors[i].color] = colors[i].count
-	end
-
-	return colors
 end
 
 
@@ -277,28 +243,24 @@ local function analyze(playable)
 		-- ^ this ^ probably won't get picked up right, make it trinary? Check player count on read?
 	end
 
-	local color_log, color_total = categorize_playable(playable)
-
 	local current_color = discard[#discard]:sub(2)
 	if current_color == 'z' then
 		current_color = discard[#discard]:sub(3)
 	end
 
-	local color_stats = get_color_stats()
+	local to_play = nil
 
-	local played = nil
 	if current_color == nil then
 		-- literally only wildstart
 		-- this is so rare it's a near meaningless choice
 		-- just pick a normie card from the highest color
 		--  but also you could have no normie cards
 		--  and lol you could have literally every other wild
-		-- FIXME: I hate this
-		if #color_log[color_stats[color_stats[1].color].color].normal ~= 0 then
-			return color_log[color_stats[color_stats[1].color].color].normal[
-				math.random(#color_log[color_stats[color_stats[1].color].color].normal)]
-		end
+		-- logic should look like, if not be identical to, wild color selection
 	end
+
+	local hand_color_stats, hand_color_map = get_color_stats(players[turn].hand)
+	local playable_color_stats, playable_color_map = get_color_stats(playable)
 
 	-- WARNING: PLAYABLE MAY BE Z, Z
 	-- DUAL Z NOT HANDLED BY PRIMARY LOOP LOGIC
@@ -380,10 +342,8 @@ end
 
 
 local function draw()
-	-- draw dingle card
-	-- replenishes deck
-	-- can end game
-	-- returns card code or nil if game over
+	-- draw single card, refill deck when needed.
+	-- returns card code or nil on exhaust
 
 	-- in theory, deck exhaustion doesn't have to be game over if no one ever draws again
 	-- refill before return, so if it's empty now, you're out
@@ -398,6 +358,8 @@ local function draw()
 		table.insert(discard, tod)
 		return hold
 	else
+		-- raising really just made the callees more complex for VERY little gain :c
+		-- error('deck_exhaust')
 		return nil
 	end
 end
@@ -426,7 +388,9 @@ local function play_card(card)
 		end
 	end
 	if not did_eject then
-		print('AAAAA fake card', card)
+		-- tbh maybe I should raise
+		error('Illegal play: ' .. card)
+		-- print('AAAAA fake card', card)
 	end
 
 	-- only the playing person can win right now
@@ -434,12 +398,13 @@ local function play_card(card)
 		return {turn}
 	end
 
-	-- order should be
+	-- order should be:
 	-- reverse
 	-- turn cycle
 	-- force draw
+	--  anyone can win when applying a draw
 	-- skip apply
-	--  technically anyone can win when applying a draw
+
 	if card:sub(1) == 'R' then
 		order = order * -1
 	end
@@ -447,13 +412,13 @@ local function play_card(card)
 	turn = (((turn - 1) + order) % #players) + 1
 
 	local to_draw = 0
-	local drawn = {}
 	if card:sub(1) == 'D' then
 		to_draw = 2
-	elseif card:sub(1) == '+' then
+	elseif card:sub(1) == 'X' then
 		to_draw = 4
 	end
 	if to_draw ~= 0 then
+		local drawn = {}
 		for _ = 1, to_draw do
 			-- whatever, I can check a nil later
 			table.insert(drawn, draw())
@@ -466,7 +431,7 @@ local function play_card(card)
 		end
 	end
 
-	if card:sub(1) == 'S' or card:sub(1) == 'D' or card:sub(1) == '+' then -- not all Z, just +
+	if card:sub(1) == 'S' or card:sub(1) == 'D' or card:sub(1) == 'X' then -- not all Z, just X
 		-- shift to 0-base, apply rotation, then shift back ;)
 		turn = (((turn - 1) + order) % #players) + 1
 	end
@@ -476,15 +441,15 @@ end
 
 
 local function draw_playable()
-	-- draw until that changes. append it to playable
-	-- returns card or nil on exhaust
+	-- draw until a playable is reached, appending to hand
+	-- returns playable card or nil on exhaust
 	local card
 	while true do
 		card = draw()
 		-- is_playable can't handle nil probably
 		-- and I kinda don't want to add support because that's gonna be a busy function
 		if card == nil then
-			-- please, I just want to raise
+			-- by the time I found out I could raise it only made the code messier :(
 			return nil
 		end
 		table.append(players[turn].hand, card)
@@ -528,7 +493,8 @@ while true do
 			else
 				-- compute density numbers, play a 3-code wild
 				-- TODO: pick second or third with density-based odds?
-				local color_density = get_color_stats()
+				-- TODO: sync this with wildstart/internal wild code
+				local color_density = get_color_stats(players[turn].hand)
 				played = playable[1] .. color_density[1].color
 			end
 		else
@@ -544,13 +510,10 @@ while true do
 		-- or is that too "easy"? hand holdy?
 	end
 
-	-- cycle turns do whatever else is needed, or halt and return true
-	-- return winner number OR zero?
 	local winner = play_card(played)
 	if winner ~= nil then
 		return winner
 	end
-
 end end
 
 
