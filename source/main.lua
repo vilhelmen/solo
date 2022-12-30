@@ -23,16 +23,16 @@ local function DISPLAY_SORT(a, b)
 end
 
 
-function build_deck()
+local function build_deck()
 	local singles = {'0'} -- multiply by color
 	local doubles = {'1','2','3','4','5','6','7','8','9','D','R','S'} -- multiply by color by 2
 	local quads = {'W','X'} -- 4 of each, null color. I don't like X but I need something that comes after W
 	local colors = {'r','y','g','b'} -- capitalization?
 	-- this should make a reasonable ordering when sorted as well. Handy.
 	-- Color should be added to the back for better planning, but should be reversed for user display maybe
-	
+
 	local deck = {} -- TODO: change to playdate table create func
-	
+
 	-- I have decided I do not like lua
 	for _, pass_color in pairs(colors) do
 		for _, v in pairs(singles) do
@@ -49,7 +49,7 @@ function build_deck()
 	return deck
 end
 
-function shuffle(deck)
+local function shuffle(deck)
 	-- lua is pass by ref so this makes calling a little ugly.
 	-- Don't think there's a case where I should deepcopy or whatever
 	-- UGH fisher-yates is FINE
@@ -73,7 +73,7 @@ local players = nil
 local turn = nil
 local order = nil
 
-function initialize(player_count)
+local function initialize(player_count)
 	-- boot everything for the primary loop
 	deck = build_deck()
 	print(table.concat(deck,',')) -- TODO: remove
@@ -117,11 +117,55 @@ function initialize(player_count)
 end
 
 
+local function is_normal(card)
+	-- technically we don't have anything below '0' at the moment since + is now X
+	return card:sub(1) <= '9' and card:sub(1) >= '0'
+end
+
+
+local function is_special(card)
+	return not is_normal(card) -- get owned
+end
+
+
+local function categorize_playable(playable)
+	-- count and log hand colors and their count
+	-- reminder that playable is deduplicated
+	local color_log = { -- no need for special if we have the flags?
+		r={normal={}, special={}, d=false, r=false, s=false};
+		g={normal={}, special={}, d=false, r=false, s=false};
+		b={normal={}, special={}, d=false, r=false, s=false};
+		y={normal={}, special={}, d=false, r=false, s=false};
+		z={w=false, x=false}
+	}
+
+	-- wildstart should have marked all as playable
+
+	-- ok, big brain time.
+	-- a foreign color can only be hand-dominant iff ...?
+	--  we have none of the current color (we can really only have one of a foreign color, playable is deduped)
+	--  current card is a wildstart -- technically no color is foreign?
+
+	-- FIXME: letter codes are in caps because I am dumb, this will not work right
+	for _, v in pairs(playable) do
+		if is_normal(v) then
+			-- no z is normal
+			table.append(color_log[v:sub(1)].normal, v)
+		else
+			-- no log for z
+			if v:sub(2) ~= 'z' then
+				table.append(color_log[v:sub(1)].special, v)
+			end
+			color_log[v:sub(2)][v:sub(1)] = true
+		end
+	end
+end
+
 -- UHHHHH stomp over the card code if it's wild and the color has been selected?
 -- but then you need to remember to reset it
 -- otherwise we need an external wild color tracker
 
-function dump()
+local function dump()
 	print('TOD: ', discard[#discard])
 	print('Current player: ', turn)
 	print('Order: ', order)
@@ -131,20 +175,21 @@ function dump()
 	end
 end
 
-function analyze(whoami)
+
+local function analyze(playable)
 	-- gather intel
 	-- flag everyone near winning
 	-- figure out which turn order is better
 	-- figure out skip/draw/wild strats
 	-- build hand plan?
 	local us_losing = false -- panic
-	local us_winning = #players[whoami].hand <= PANIC_THRESHOLD
+	local us_winning = #players[turn].hand <= PANIC_THRESHOLD
 	local us_most_winning = true -- but are we the winningest? Causes panic
-	local least_cards = #players[whoami].hand
+	local least_cards = #players[turn].hand
 
 	local intel = {}
 	for i = 1, #players do
-		if i ~= whoami then
+		if i ~= turn then
 			-- thankfully our data on other players is VERY limited
 			table.insert(intel, {
 				winning=#players[i].hand <= PANIC_THRESHOLD,
@@ -152,17 +197,17 @@ function analyze(whoami)
 				total=#players[i].hand, -- ugh I'll need it for nuance
 				id=players[i].id,
 				-- we are n away from ourself (if included)
-				distance=(((whoami - 1) + order * players[i].id) % #players) + 1,
+				distance=(((turn - 1) + order * players[i].id) % #players) + 1,
 			})
 			us_losing = us_losing or intel[#intel].winning
-			us_most_winning = us_most_winning and #players[whoami].hand <= #players[i].hand
+			us_most_winning = us_most_winning and #players[turn].hand <= #players[i].hand
 			if #players[i].hand < least_cards then
 				least_cards = #players[i].hand
 			end
 		end
 	end
 	-- tag who has the least cards
-	for k, v in pairs(intel) do
+	for _, v in pairs(intel) do
 		if v.total == least_cards then
 			v.most_winning = true
 		end
@@ -187,18 +232,68 @@ function analyze(whoami)
 	else
 		do_skip = true -- always good
 		do_reverse = false -- at BEST it's not helpful... unless we make it a skip ;)
+		-- ^ this ^ probably won't get picked up right, make it trinary? Check player count on read?
 	end
-	-- do we rummage through our playables now?
+
+	local color_breakdown = categorize_playable(playable)
+
+	local current_color = discard[#discard]:sub(2)
+	if current_color == 'z' then
+		current_color = discard[#discard]:sub(3)
+	end
+
+	local color_stats = get_color_stats()
+
+	if current_color == nil then
+		-- wildstart
+		-- most normals or most total cards?
+		-- should mirror logic with wild play?
+	end
+
+	-- WARNING: PLAYABLE MAY BE Z, Z
+	-- DUAL Z NOT HANDLED BY PRIMARY LOOP LOGIC
+	-- dual z means do_reverse/do_punish need to fight it out
+
+	-- if we can play a normal card, then ignore z? Unless panic and Xz?
+
+	-- Playable is already sorted, if the first isn't a number, we're special only
+	-- rank all specials according to panic logic and play first that exists?
+	-- specials could still be cross-color, need color state and crossing data
+	-- if we're not panic, ignore specials? Low-rank them?
+
+	-- cataloging our colors is HELL
+	-- we should probably count and log them
+	
+	-- lol fun idea, bots get a boredom counter that makes them play specials with increasing %
 end
 
-function get_playable()
+
+local function is_playable(card)
+	-- same color, same symbol, owned wilds, color matching played wild
+	-- a bad lookup is already nil so no need for or nil
+	-- an uncoded wild will flag everything as valid
+
+	-- what's the performance penalty if 4 lookups/lens
+	-- but also lol who cares
+	-- kinda ugly when called in a loop
+	local current = discard[#discard]
+	if (card:sub(2) == current:sub(2)) or (card:sub(1) == current:sub(1)) or
+			(card:sub(2) == 'z') or (card:sub(2) == current:sub(3)) then
+		return true
+	else
+		return false
+	end
+end
+
+
+local function get_playable()
 	-- returns list of playable cards (deduplicated), and boolean hand mask
 	-- Wilds go to the back (read, if top is z you have no choice)
 	local singles = {}
 	local playable = {}
 	local mask = {}
 
-	for k, v in pairs(players[turn].hand) do
+	for _, v in pairs(players[turn].hand) do
 		if is_playable(v) then
 			if singles[v] == nil then
 				table.insert(playable, v)
@@ -215,7 +310,8 @@ function get_playable()
 	return playable, mask
 end
 
-function find_winner()
+
+local function find_winner()
 	-- deck exhaustion is ambiguous and there could be a tie
 	local min_hand = #players[1].hand
 	for i = 2, #players do
@@ -229,79 +325,11 @@ function find_winner()
 			table.insert(winners, i)
 		end
 	end
-	
 	return winners
 end
 
 
-function play_card(card)
-	-- uhhhhhhhh I guess we know what turn it is, globally...........
-	-- Expect 3-code wilds
-	-- blank 3-codes after they are played over (ensure 3code cleared before any draws)
-	-- remove card from hand
-	-- Apply draw/skip/etc
-	-- returns winner vector or nil
-	
-	-- place ToD
-	table.insert(discard, card)
-	-- Strip any 3codes
-	discard[#discard - 1] = string.sub(discard[#discard - 1], 1, 2)
-	card = string.sub(card, 1, 2)
-	--remove from hand. if it's not in there, congrats you played a card that didn't exist and got away with it
-	for i = 1, #players[turn].hand do
-		if #players[turn].hand[i] == card then
-			table.remove(players[turn].hand, i)
-			break
-		end
-	end
-	
-	-- only the playing person can win right now
-	if #players[turn].hand == 0 then
-		return {turn}
-	end
-	
-	-- order should be
-	-- reverse
-	-- turn cycle
-	-- force draw
-	-- skip apply
-	--  technically anyone can win when applying a draw
-	if card:sub(1) == 'R' then
-		order = order * -1
-	end
-
-	turn = (((turn - 1) + order) % #players) + 1
-
-	local to_draw = 0
-	local drawn = {}
-	if card:sub(1) == 'D' then
-		to_draw = 2
-	elseif card:sub(1) == '+' then
-		to_draw = 4
-	end
-	if to_draw ~= 0 then
-		for i = 1, to_draw do
-			-- whatever, I can check a nil later
-			table.insert(drawn, draw())
-		end
-		if #drawn ~= to_draw then
-			-- FRICK, exhaustion, GAME OVER MAN, GAME OVER
-			return find_winner()
-		else
-			table.move(drawn, 1, #drawn, #players[turn].hand + 1, players[turn].hand)
-		end
-	end
-
-	if card:sub(1) == 'S' or card:sub(1) == 'D' or card:sub(1) == '+' then -- not all Z, just +
-		-- shift to 0-base, apply rotation, then shift back ;)
-		turn = (((turn - 1) + order) % #players) + 1
-	end
-
-	return nil -- do I have to explicitly return nil?
-end
-
-
-function draw()
+local function draw()
 	-- draw dingle card
 	-- replenishes deck
 	-- can end game
@@ -324,24 +352,75 @@ function draw()
 	end
 end
 
-function is_playable(card)
-	-- same color, same symbol, owned wilds, color matching played wild
-	-- a bad lookup is already nil so no need for or nil
-	-- an uncoded wild will flag everything as valid
-	
-	-- what's the performance penalty if 4 lookups/lens
-	-- but also lol who cares
-	-- kinda ugly when called in a loop
-	local current = discard[#discard]
-	if (card:sub(2) == current:sub(2)) or (card:sub(1) == current:sub(1)) or
-			(card:sub(2) == 'z') or (card:sub(2) == current:sub(3)) then
-		return true
-	else
-		return false
+
+local function play_card(card)
+	-- uhhhhhhhh I guess we know what turn it is, globally...........
+	-- Expect 3-code wilds
+	-- blank 3-codes after they are played over (ensure 3code cleared before any draws)
+	-- remove card from hand
+	-- Apply draw/skip/etc
+	-- returns winner vector or nil
+
+	-- place ToD
+	table.insert(discard, card)
+	-- Strip any 3codes
+	discard[#discard - 1] = string.sub(discard[#discard - 1], 1, 2)
+	card = string.sub(card, 1, 2)
+	--remove from hand. if it's not in there, congrats you played a card that didn't exist and got away with it
+	for i = 1, #players[turn].hand do
+		if #players[turn].hand[i] == card then
+			table.remove(players[turn].hand, i)
+			break
+		end
 	end
+
+	-- only the playing person can win right now
+	if #players[turn].hand == 0 then
+		return {turn}
+	end
+
+	-- order should be
+	-- reverse
+	-- turn cycle
+	-- force draw
+	-- skip apply
+	--  technically anyone can win when applying a draw
+	if card:sub(1) == 'R' then
+		order = order * -1
+	end
+
+	turn = (((turn - 1) + order) % #players) + 1
+
+	local to_draw = 0
+	local drawn = {}
+	if card:sub(1) == 'D' then
+		to_draw = 2
+	elseif card:sub(1) == '+' then
+		to_draw = 4
+	end
+	if to_draw ~= 0 then
+		for _ = 1, to_draw do
+			-- whatever, I can check a nil later
+			table.insert(drawn, draw())
+		end
+		if #drawn ~= to_draw then
+			-- FRICK, exhaustion, GAME OVER MAN, GAME OVER
+			return find_winner()
+		else
+			table.move(drawn, 1, #drawn, #players[turn].hand + 1, players[turn].hand)
+		end
+	end
+
+	if card:sub(1) == 'S' or card:sub(1) == 'D' or card:sub(1) == '+' then -- not all Z, just +
+		-- shift to 0-base, apply rotation, then shift back ;)
+		turn = (((turn - 1) + order) % #players) + 1
+	end
+
+	return nil -- do I have to explicitly return nil?
 end
 
-function get_color_stats()
+
+local function get_color_stats()
 	-- literally only have z so I can loop without it exploding, delete it after
 	-- also the "official" color listing is trapped in init. z isn't in it anyway
 	-- if I keep a pair with count and color then I can't index via color code without a second mapping
@@ -350,7 +429,7 @@ function get_color_stats()
 		{count=0,color='r'}; {count=0,color='b'};
 		{count=0,color='g'}; {count=0,color='y'}; {count=0,color='z'}}
 	local map = {r=1, b=2, g=3, y=4, z=5}
-	for k, v in pairs(players[turn].hand) do
+	for _, v in pairs(players[turn].hand) do
 		-- TODO: playdate has a +=, use it?
 		-- omg you can't index a string
 		colors[map[v:sub(2)]].count = colors[map[v:sub(2)]].count + 1
@@ -366,14 +445,16 @@ function get_color_stats()
 	return colors
 end
 
-function draw_playable()
+
+local function draw_playable()
 	-- draw until that changes. append it to playable
 	-- returns card or nil on exhaust
+	local card
 	while true do
-		local card = draw()
+		card = draw()
 		-- is_playable can't handle nil probably
 		-- and I kinda don't want to add support because that's gonna be a busy function
-		if draw == nil then
+		if card == nil then
 			-- please, I just want to raise
 			return nil
 		end
@@ -385,7 +466,8 @@ function draw_playable()
 	return card
 end
 
-function run(n)
+
+local function run(n)
 	initialize(n)
 	-- FIXME: debug stuff, skip player
 	turn = 2
@@ -421,7 +503,7 @@ while true do
 				played = playable[1] .. color_density[1].color
 			end
 		else
-			analyze(turn)
+			analyze(playable)
 			-- TODO: UGH FIGURE IT OUT
 		end
 	else
@@ -432,11 +514,11 @@ while true do
 		-- like, playable cards are bumped up a quarter
 		-- or is that too "easy"? hand holdy?
 	end
-	
+
 	-- cycle turns do whatever else is needed, or halt and return true
 	-- return winner number OR zero?
 	local winner = play_card(played)
-	if not winner == nil then
+	if winner ~= nil then
 		return winner
 	end
 
