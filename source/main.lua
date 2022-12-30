@@ -129,15 +129,16 @@ end
 
 
 local function categorize_playable(playable)
-	-- count and log hand colors and their count
+	-- returns playable color breakdown and available color total
 	-- reminder that playable is deduplicated
 	local color_log = { -- no need for special if we have the flags?
-		r={normal={}, special={}, d=false, r=false, s=false};
-		g={normal={}, special={}, d=false, r=false, s=false};
-		b={normal={}, special={}, d=false, r=false, s=false};
-		y={normal={}, special={}, d=false, r=false, s=false};
-		z={w=false, x=false}
+		r={normal={}, special={}, D=false, R=false, S=false};
+		g={normal={}, special={}, D=false, R=false, S=false};
+		b={normal={}, special={}, D=false, R=false, S=false};
+		y={normal={}, special={}, D=false, R=false, S=false};
+		z={normal={}, special={}, W=false, X=false}
 	}
+	local color_total = 0
 
 	-- wildstart should have marked all as playable
 
@@ -146,19 +147,29 @@ local function categorize_playable(playable)
 	--  we have none of the current color (we can really only have one of a foreign color, playable is deduped)
 	--  current card is a wildstart -- technically no color is foreign?
 
-	-- FIXME: letter codes are in caps because I am dumb, this will not work right
 	for _, v in pairs(playable) do
 		if is_normal(v) then
 			-- no z is normal
 			table.append(color_log[v:sub(1)].normal, v)
 		else
-			-- no log for z
-			if v:sub(2) ~= 'z' then
-				table.append(color_log[v:sub(1)].special, v)
-			end
+			table.append(color_log[v:sub(1)].special, v)
 			color_log[v:sub(2)][v:sub(1)] = true
 		end
 	end
+
+	-- discard blank entries (will i regret this?)
+	-- is adding sorted numerical order useful?
+	-- it's mostly just notable for existing for foreign colors
+	-- color_stats are needed for full color consideration
+	-- UGH NO LENGTH DATA
+	for v in {'r', 'g', 'b', 'y', 'z'} do
+		if (color_log[v].normal + color_log[v].special) == 0 then
+			color_log[v] = nil
+		else
+			color_total = color_total + 1
+		end
+	end
+	return color_log, color_total
 end
 
 -- UHHHHH stomp over the card code if it's wild and the color has been selected?
@@ -173,6 +184,37 @@ local function dump()
 	for i = 1, #players do
 		print('', i, table.concat(players[i].hand, ','))
 	end
+end
+
+
+local function get_color_stats()
+	-- literally only have z so I can loop without it exploding, delete it after
+	-- also the "official" color listing is trapped in init. z isn't in it anyway
+	-- if I keep a pair with count and color then I can't index via color code without a second mapping
+	-- UGH IF I USE THE COLOR AS THE KEY I CAN'T SORT IT DIRECTLY THIS SUCKS
+	local colors = {
+		{count=0, color='r'}; {count=0, color='b'};
+		{count=0, color='g'}; {count=0, color='y'}; {count=0, color='z'}}
+	local map = {r=1, b=2, g=3, y=4, z=5}
+	for _, v in pairs(players[turn].hand) do
+		-- TODO: playdate has a +=, use it?
+		-- omg you can't index a string
+		colors[map[v:sub(2)]].count = colors[map[v:sub(2)]].count + 1
+	end
+	table.sort(colors, function(a, b) return a.count > b.count end)
+
+	-- toss empty colors
+	while colors[#colors].count == 0 do
+		table.remove(colors)
+	end
+
+	-- OH BABY SINCE THEY'RE NOT NUMBERS I CAN HIDE THE DIRECT COUNTS
+	-- OH NO THIS IS EXPOSED VIA PAIRS, IS THAT BAD?
+	for i = 1, #colors do
+		colors[colors[i].color] = colors[i].count
+	end
+
+	return colors
 end
 
 
@@ -235,7 +277,7 @@ local function analyze(playable)
 		-- ^ this ^ probably won't get picked up right, make it trinary? Check player count on read?
 	end
 
-	local color_breakdown = categorize_playable(playable)
+	local color_log, color_total = categorize_playable(playable)
 
 	local current_color = discard[#discard]:sub(2)
 	if current_color == 'z' then
@@ -244,10 +286,18 @@ local function analyze(playable)
 
 	local color_stats = get_color_stats()
 
+	local played = nil
 	if current_color == nil then
-		-- wildstart
-		-- most normals or most total cards?
-		-- should mirror logic with wild play?
+		-- literally only wildstart
+		-- this is so rare it's a near meaningless choice
+		-- just pick a normie card from the highest color
+		--  but also you could have no normie cards
+		--  and lol you could have literally every other wild
+		-- FIXME: I hate this
+		if #color_log[color_stats[color_stats[1].color].color].normal ~= 0 then
+			return color_log[color_stats[color_stats[1].color].color].normal[
+				math.random(#color_log[color_stats[color_stats[1].color].color].normal)]
+		end
 	end
 
 	-- WARNING: PLAYABLE MAY BE Z, Z
@@ -366,12 +416,17 @@ local function play_card(card)
 	-- Strip any 3codes
 	discard[#discard - 1] = string.sub(discard[#discard - 1], 1, 2)
 	card = string.sub(card, 1, 2)
-	--remove from hand. if it's not in there, congrats you played a card that didn't exist and got away with it
+	-- sanity check for fake cards, bot logic may end up building card strings :/
+	local did_eject = false
 	for i = 1, #players[turn].hand do
 		if #players[turn].hand[i] == card then
 			table.remove(players[turn].hand, i)
+			did_eject = true
 			break
 		end
+	end
+	if not did_eject then
+		print('AAAAA fake card', card)
 	end
 
 	-- only the playing person can win right now
@@ -417,32 +472,6 @@ local function play_card(card)
 	end
 
 	return nil -- do I have to explicitly return nil?
-end
-
-
-local function get_color_stats()
-	-- literally only have z so I can loop without it exploding, delete it after
-	-- also the "official" color listing is trapped in init. z isn't in it anyway
-	-- if I keep a pair with count and color then I can't index via color code without a second mapping
-	-- UGH IF I USE THE COLOR AS THE KEY I CAN'T SORT IT DIRECTLY THIS SUCKS
-	local colors = {
-		{count=0,color='r'}; {count=0,color='b'};
-		{count=0,color='g'}; {count=0,color='y'}; {count=0,color='z'}}
-	local map = {r=1, b=2, g=3, y=4, z=5}
-	for _, v in pairs(players[turn].hand) do
-		-- TODO: playdate has a +=, use it?
-		-- omg you can't index a string
-		colors[map[v:sub(2)]].count = colors[map[v:sub(2)]].count + 1
-	end
-	colors[5] = nil -- BEGONE Z. Will I regret this? Who knows!
-	table.sort(colors, function(a, b) return a.count > b.count end)
-
-	-- OH BABY SINCE THEy'RE NOT NUMBERS I CAN HIDE THE DIRECT COUNTS
-	for i = 1, 4 do
-		colors[colors[i].color] = colors[i].count
-	end
-
-	return colors
 end
 
 
@@ -527,3 +556,8 @@ end end
 
 print(run(4))
 -- require "croissant.debugger"()
+
+-- best idea, menu entry for ending game
+-- multi-stage tableflip anim, a to progress, b to cancel
+-- sit -(A)> stand -(A)> flip.
+-- def have an upside down 7 card visible
