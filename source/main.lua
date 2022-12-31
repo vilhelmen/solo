@@ -221,7 +221,12 @@ local function analyze(playable)
 	-- figure out skip/draw/wild strats
 	-- build hand plan?
 
-	-- TODO: move draw_playable and single playable to here
+	-- TODO: move draw_playable to here
+	-- UGH just putting this here for now
+	--  playable isn't deduplicated, so this is 50% less useful
+	if #playable == 1 then
+		return playable[1]
+	end
 
 	local us_losing = false -- panic
 	local us_winning = #players[turn].hand <= PANIC_THRESHOLD
@@ -292,13 +297,16 @@ local function analyze(playable)
 	end
 
 	local to_play = nil
-	local priority_list = {}
+	-- local priority_list = {}
 
 	-- big brain, playable_z is strictly worse than hand_z because it's deduplicated
 	local playable_color_stats, playable_color_map = get_color_stats(playable)
 
 	-- there is NO reason to consider Z in hand_color UNLESS you're in 2p fishing for Wz combos
 	--  or, perhaps, in panic
+	-- is 2p going to be its own primary logic that fishes for combos?
+	-- TODO: let this return a list of cards in 2p mode?
+	--  loop outside play_card and raise if turn changes?
 	local hand_color_stats, hand_color_map, hand_z = get_color_stats(players[turn].hand)
 	
 	local color_choices = get_good_colors(hand_color_stats)
@@ -313,8 +321,7 @@ local function analyze(playable)
 			-- how did this happen
 			error('Bot has nothing to play???')
 		end
-		-- ZZ! (or z and I removed the external explicit single handling)
-		-- you could have multiple X or multiple W and none of the other
+		-- Unknown combination of z cards
 		-- pick X based on do_punish
 
 		-- Big brain time: if you have W and X, does the order really matter?
@@ -332,6 +339,12 @@ local function analyze(playable)
 
 		return to_play .. color_choices(math.random(#color_choices))
 	end
+	
+	-- TODO: Deduplicated view into playable? It eases some selection^[citation needed]
+	-- would be nice to know if we really don't have much of a choice in selection.
+	--  deduplicate and then flatten each color_state normie/special?
+	--  one chunk = one category of card
+	--  but could still be special, which requires discrimnination at times
 
 	-- CONFIRMED, HAVE A NON-Z TO PLAY *SOMEWHERE*
 	if current_color == nil then
@@ -351,9 +364,10 @@ local function analyze(playable)
 		end
 	end
 
-	-- you are not allowed to complain about variable names
-	-- local nz_hc_stats, nz_hc_map = non_z_copy(hand_color_stats)
-	-- get owned z, you have been banished from color_stats
+	local can_jump = #color_choices > 1
+	local should_jump -- current is not the most, with minor leeway (at LEAST 1 b/c totals post-play)
+	-- note: not wild-inclusive ^^
+	-- need to discriminate special/normie jumps? It could consume a valuable card.
 
 	if not panic then
 		-- check if we should jump colors (if possible)
@@ -364,22 +378,14 @@ local function analyze(playable)
 		--  if we have no normies, or on % chance, add specials into the choice
 		
 	else
-
+		-- FRICK. have to rank our options vs do_ codes
 	end
-
-	-- WARNING: PLAYABLE MAY BE Z, Z
-	-- DUAL Z NOT HANDLED BY PRIMARY LOOP LOGIC
-	-- dual z means do_reverse/do_punish need to fight it out
 
 	-- if we can play a normal card, then ignore z? Unless panic and Xz?
 
-	-- Playable is already sorted, if the first isn't a number, we're special only
 	-- rank all specials according to panic logic and play first that exists?
 	-- specials could still be cross-color, need color state and crossing data
 	-- if we're not panic, ignore specials? Low-rank them?
-
-	-- cataloging our colors is HELL
-	-- we should probably count and log them
 	
 	-- lol fun idea, bots get a boredom counter that makes them play specials with increasing %
 end
@@ -404,18 +410,13 @@ end
 
 
 local function get_playable()
-	-- returns list of playable cards (deduplicated), and boolean hand mask
-	-- Wilds go to the back (read, if top is z you have no choice)
-	local singles = {}
+	-- returns list of playable cards, and boolean hand mask
 	local playable = {}
 	local mask = {}
 
 	for _, v in pairs(players[turn].hand) do
 		if is_playable(v) then
-			if singles[v] == nil then
-				table.insert(playable, v)
-			end
-			singles[v] = true -- why branch to do this
+			table.insert(playable, v)
 			table.insert(mask, true)
 		else
 			table.insert(mask, false)
@@ -423,7 +424,8 @@ local function get_playable()
 	end
 
 	-- put wilds at the end
-	table.sort(playable, DEFAULT_SORT)
+	-- FIXME: do we notably rely on this anywhere? Remove it.
+	-- table.sort(playable, DEFAULT_SORT)
 	return playable, mask
 end
 
@@ -590,22 +592,9 @@ while true do
 	end
 
 	if turn ~= 1 then
-		if #playable == 1 then
-			-- just do it. if it's wild, we need to check our numbers
-			-- but a full analysis isn't really needed
-			if playable[1]:sub(2) ~= 'z' then
-				played = playable[1]
-			else
-				-- compute density numbers, play a 3-code wild
-				-- TODO: pick second or third with density-based odds?
-				-- TODO: sync this with wildstart/internal wild code
-				local color_density = get_color_stats(players[turn].hand)
-				played = playable[1] .. color_density[1].color
-			end
-		else
-			analyze(playable)
-			-- TODO: UGH FIGURE IT OUT
-		end
+		-- offloading single-play, etc
+		analyze(playable)
+		-- TODO: UGH FIGURE IT OUT
 	else
 		-- player is human
 		-- run a copy of get_playable, have it be a mask?
