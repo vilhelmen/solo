@@ -85,21 +85,21 @@ local function initialize(player_count)
 
 	-- Maybe there will be individual NPCs, track that in here
 	for i = 1, player_count do
-		table.insert(players,{hand={};id=i})
+		table.insert(players, {hand={}, id=i})
 		-- id is some futureproofing. a function given a player can't tell who it is otherwise
 	end
 
 	-- deal hands
 	for _ = 1, 7 do
-		for i = 1, #players do
-			table.insert(players[i].hand, table.remove(deck))
+		for _, hand in ipairs(players) do
+			table.insert(hand, table.remove(deck))
 		end
 	end
 	-- actually idk if I ever really need to do this
 	--  no functions are gonna be optimized to take advantage of a sorted order
 	-- TODO: remove
-	for i = 1, #players do
-		table.sort(players[i].hand, DEFAULT_SORT)
+	for _, hand in ipairs(players) do
+		table.sort(hand, DEFAULT_SORT)
 	end
 
 	turn = math.random(#players)
@@ -121,7 +121,6 @@ local function is_normal(card)
 	-- technically we don't have anything below '0' at the moment since + is now X
 	return card:sub(1) <= '9' and card:sub(1) >= '0'
 end
-
 
 local function is_special(card)
 	return not is_normal(card) -- get owned
@@ -171,8 +170,8 @@ local function get_color_stats(card_pile)
 
 	-- rebuild index
 	index_map = {}
-	for i = 1, #color_log do
-		index_map[color_log[i].color] = i
+	for i, v in ipairs(color_log) do
+		index_map[v.color] = i
 	end
 
 	return color_log, index_map, z_log
@@ -187,32 +186,27 @@ local function dump()
 	print('Current player: ', turn)
 	print('Order: ', order)
 	print('Hands: ')
-	for i = 1, #players do
-		print('', i, table.concat(players[i].hand, ','))
+	for i,v in ipairs(players) do
+		print('', i, table.concat(v.hand, ','))
 	end
 end
 
--- local function non_z_copy(stats)
--- 	-- z in color data is a pain in my ass, it's just in the way!
--- 	-- shallow copy because I'm lazy! Don't beef it!
--- 	local new_stats = {}
--- 	local new_map = {}
--- 	for _, v in pairs(stats) do
--- 		if v.color ~= 'z' then
--- 			table.insert(new_stats, v)
--- 			new_map[v.color] = #new_stats
--- 		end
--- 	end
--- 	return new_stats, new_map
--- end
 
 local function get_good_colors(hand_color_stats)
-	local distance, floor = 2, 1
 	-- return color codes (desc) that are comparable in size to the largest
 	-- what if it's, like, 3, 1, 1. 1 is clearly bad
-	-- 4, 2, 2, 2.... still bad
-	-- 5, 3, 3, 3 still bad??
-	
+	-- 4, 2, 2... still bad?
+	-- 5, 3, 3, still bad??
+	-- 3, 2, 2... ?
+	-- maybe it's a percentage.
+	-- 3, 1 is 1/3 - 5,3 is 3/5... strictly greater than 50%?
+	-- 6, 3, 3? 10 4 4? 10, 6, 5...
+	local colors = {hand_color_stats[1].color}
+	for i = 2, #hand_color_stats do
+		if hand_color_stats[i]/hand_color_stats[1] > 0.50 then
+			table.insert(colors, hand_color_stats[i].color)
+		end
+	end
 end
 
 local function analyze(playable)
@@ -230,21 +224,21 @@ local function analyze(playable)
 	local least_cards = #players[turn].hand
 
 	local intel = {}
-	for i = 1, #players do
+	for i, v in ipairs(players) do
 		if i ~= turn then
 			-- thankfully our data on other players is VERY limited
 			table.insert(intel, {
-				winning=#players[i].hand <= PANIC_THRESHOLD,
+				winning=#v.hand <= PANIC_THRESHOLD,
 				most_winning=false, -- touch up after the fact
-				total=#players[i].hand, -- ugh I'll need it for nuance
-				id=players[i].id,
+				total=#v.hand, -- ugh I'll need it for nuance
+				id=v.id,
 				-- we are n away from ourself (if included)
-				distance=(((turn - 1) + order * players[i].id) % #players) + 1,
+				distance=(((turn - 1) + order * v.id) % #players) + 1,
 			})
 			us_losing = us_losing or intel[#intel].winning
-			us_most_winning = us_most_winning and #players[turn].hand <= #players[i].hand
-			if #players[i].hand < least_cards then
-				least_cards = #players[i].hand
+			us_most_winning = us_most_winning and #players[turn].hand <= #v.hand
+			if #v.hand < least_cards then
+				least_cards = #v.hand
 			end
 		end
 	end
@@ -424,8 +418,8 @@ local function find_winner()
 		end
 	end
 	local winners = {}
-	for i = 1, #players do
-		if #players[i].hand == min_hand then
+	for i, v in ipairs(players) do
+		if #v.hand == min_hand then
 			table.insert(winners, i)
 		end
 	end
