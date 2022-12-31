@@ -129,7 +129,7 @@ end
 
 
 local function get_color_stats(card_pile)
-	-- returns playable color breakdown and available color total
+	-- returns playable color breakdown, color map, and z breakdown
 	-- reminder that playable is deduplicated
 	local color_log = { -- no need for special if we have the flags?
 		{normal={}, special={}, D=false, R=false, S=false, color='r', total=0};
@@ -155,18 +155,27 @@ local function get_color_stats(card_pile)
 		color_log[index_map[v:sub(2)]].total = color_log[index_map[v:sub(2)]].total + 1
 	end
 
+	-- UGH z consistently clouds judgement, pull it out
+	local z_log = color_log[index_map.z]
+	color_log[index_map.z] = nil
+	index_map.z = nil
+	if z_log.total == 0 then
+		z_log = nil
+	end
+
 	-- pruning post-sort because I'm a terrible person
 	table.sort(color_log, function(a, b) return a.total < b.total end)
 	while color_log[#color_log].total == 0 do
 		table.remove(color_log)
 	end
 
+	-- rebuild index
 	index_map = {}
 	for i = 1, #color_log do
 		index_map[color_log[i].color] = i
 	end
 
-	return color_log, index_map
+	return color_log, index_map, z_log
 end
 
 -- UHHHHH stomp over the card code if it's wild and the color has been selected?
@@ -183,6 +192,28 @@ local function dump()
 	end
 end
 
+-- local function non_z_copy(stats)
+-- 	-- z in color data is a pain in my ass, it's just in the way!
+-- 	-- shallow copy because I'm lazy! Don't beef it!
+-- 	local new_stats = {}
+-- 	local new_map = {}
+-- 	for _, v in pairs(stats) do
+-- 		if v.color ~= 'z' then
+-- 			table.insert(new_stats, v)
+-- 			new_map[v.color] = #new_stats
+-- 		end
+-- 	end
+-- 	return new_stats, new_map
+-- end
+
+local function get_good_colors(hand_color_stats)
+	local distance, floor = 2, 1
+	-- return color codes (desc) that are comparable in size to the largest
+	-- what if it's, like, 3, 1, 1. 1 is clearly bad
+	-- 4, 2, 2, 2.... still bad
+	-- 5, 3, 3, 3 still bad??
+	
+end
 
 local function analyze(playable)
 	-- gather intel
@@ -190,6 +221,9 @@ local function analyze(playable)
 	-- figure out which turn order is better
 	-- figure out skip/draw/wild strats
 	-- build hand plan?
+
+	-- TODO: move draw_playable and single playable to here
+
 	local us_losing = false -- panic
 	local us_winning = #players[turn].hand <= PANIC_THRESHOLD
 	local us_most_winning = true -- but are we the winningest? Causes panic
@@ -225,21 +259,31 @@ local function analyze(playable)
 
 	local panic = us_losing or not us_most_winning -- we are, in fact, having a bad time
 	local do_punish = intel[1].winning -- attack - basically the same as skip if draw is skip
-	local do_skip = false -- attack
+	local do_skip = false -- attack by defending (lol)
 	local do_reverse = false -- defend
+	-- all draws are skips which makes punish/skip fights frustrating
+	-- combine skip/punish?
 
-	if #intel >=2 then -- 3+ total players
-		-- local triage = {}
-		-- for k,v in pairs(intel) do
-		-- 	table.insert(triage, {id=v.id, total=v.total, distance=v.distance,})
-		-- end
-		-- table.sort(triage, function(a, b) return a.total < b.total end)
-		-- checking triage order may be best way to determine moves
-		do_skip = intel[2].total > intel[1].total -- so long as we aren't skipping into a better player
-		do_reverse = intel[#intel].total > intel[1].total -- sure, if prev has more than next
+	-- skips are better than reverse (unless it makes us beef it directly ("notable" difference in total?))
+	--  because it minimizes turns
+
+	if #intel == 3 then
+		-- don't skip if the person we jump to is better off... but what about the person after THEM
+		--  a turn, in theory, is -1 to all. Skipping blocks their -1
+		--  but what if the third is about to win, we want to maximize turns before them?
+		do_skip = intel[2].total > intel[1].total and intel[1].total <= intel[3].total
+		-- don't reverse if the reverse is doing better under panic
+		do_reverse = intel[#intel].total > intel[1].total
+	elseif (#intel == 2) then
+		-- don't skip to someone of higher criticality, ideally
+		-- these rules only really apply under panic
+		do_skip = intel[2].total > intel[1].total
+		do_reverse = intel[#intel].total > intel[1].total
 	else
+		do_punish = true -- get dunked on. There's one enemy and it's you :dagger:
 		do_skip = true -- always good
-		do_reverse = false -- at BEST it's not helpful... unless we make it a skip ;)
+		do_reverse = not panic -- or us_most_winning
+		-- at BEST it's not helpful... 2p-normification is needed
 		-- ^ this ^ probably won't get picked up right, make it trinary? Check player count on read?
 	end
 
@@ -249,6 +293,10 @@ local function analyze(playable)
 	end
 
 	local to_play = nil
+	local priority_list = {}
+
+	-- big brain, playable_z is strictly worse than hand_z because it's deduplicated
+	local playable_color_stats, playable_color_map = get_color_stats(playable)
 
 	if current_color == nil then
 		-- literally only wildstart
@@ -259,8 +307,52 @@ local function analyze(playable)
 		-- logic should look like, if not be identical to, wild color selection
 	end
 
-	local hand_color_stats, hand_color_map = get_color_stats(players[turn].hand)
-	local playable_color_stats, playable_color_map = get_color_stats(playable)
+	-- there is NO reason to consider Z in hand_color UNLESS you're in 2p fishing for Wz combos
+	--  or, perhaps, in panic
+	local hand_color_stats, hand_color_map, hand_z = get_color_stats(players[turn].hand)
+
+	if #hand_color_stats == 0 then
+		if hand_z == nil then
+			-- how did this happen
+			error('Bot has nothing to play???')
+		end
+		-- ZZ! (or z and I removed the external explicit single handling)
+		-- you could have multiple X or multiple W and none of the other
+		-- pick X based on do_punish
+
+		-- Big brain time: if you have W and X, does the order really matter?
+		-- in a geologic sense, the +4 happens either way
+		-- a later +4 minimizes their average play space
+
+		-- I do no like manufacturing the card code
+		if do_punish and hand_z.X then
+			to_play = 'Xz'
+		elseif (hand_z.W) then
+			to_play = 'Wz'
+		else
+			to_play = 'Xz'
+		end
+
+		-- function, get_comperable, find list of colors that are within a tolerance (1? 2?)
+		--  maybe have a floor as well to keep you from considering a color with, like, 1 is good
+		-- use with wildstart as well
+	end
+
+	-- you are not allowed to complain about variable names
+	-- local nz_hc_stats, nz_hc_map = non_z_copy(hand_color_stats)
+	-- get owned z, you have been banished from color_stats
+
+	if not panic then
+		-- check if we should jump colors (if possible)
+		
+		
+		
+		-- if that's not interesting, just play whatever we have in the current color, snore
+		--  if we have no normies, or on % chance, add specials into the choice
+		
+	else
+
+	end
 
 	-- WARNING: PLAYABLE MAY BE Z, Z
 	-- DUAL Z NOT HANDLED BY PRIMARY LOOP LOGIC
