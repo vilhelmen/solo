@@ -91,15 +91,15 @@ local function initialize(player_count)
 
 	-- deal hands
 	for _ = 1, 7 do
-		for _, hand in ipairs(players) do
-			table.insert(hand, table.remove(deck))
+		for _, p in ipairs(players) do
+			table.insert(p.hand, table.remove(deck))
 		end
 	end
 	-- actually idk if I ever really need to do this
 	--  no functions are gonna be optimized to take advantage of a sorted order
 	-- TODO: remove
-	for _, hand in ipairs(players) do
-		table.sort(hand, DEFAULT_SORT)
+	for _, p in ipairs(players) do
+		table.sort(p.hand, DEFAULT_SORT)
 	end
 
 	turn = math.random(#players)
@@ -146,10 +146,10 @@ local function get_color_stats(card_pile)
 
 	for _, v in pairs(card_pile) do
 		if is_normal(v) then -- no z is normal
-			table.append(color_log[index_map[v:sub(2)]].normal, v)
+			table.insert(color_log[index_map[v:sub(2)]].normal, v)
 		else
-			table.append(color_log[index_map[v:sub(2)]].special, v)
-			color_log[index_map[v:sub(1)]][v:sub(1)] = true
+			table.insert(color_log[index_map[v:sub(2)]].special, v)
+			color_log[index_map[v:sub(2)]][v:sub(1)] = true
 		end
 		color_log[index_map[v:sub(2)]].total = color_log[index_map[v:sub(2)]].total + 1
 	end
@@ -186,7 +186,7 @@ local function dump()
 	print('Current player: ', turn)
 	print('Order: ', order)
 	print('Hands: ')
-	for i,v in ipairs(players) do
+	for i, v in ipairs(players) do
 		print('', i, table.concat(v.hand, ','))
 	end
 end
@@ -201,13 +201,18 @@ local function get_good_colors(hand_color_stats)
 	-- maybe it's a percentage.
 	-- 3, 1 is 1/3 - 5,3 is 3/5... strictly greater than 50%?
 	-- 6, 3, 3? 10 4 4? 10, 6, 5...
-	local colors = {hand_color_stats[1].color}
+	-- what's better, > 0.50 (oh no float precision) or uhhhhh math.ceil(n/2)?
+	-- int comparison seems nicer
+	local colors = {hand_color_stats[1].color} -- should probably check if this is empty
+	local threshold = hand_color_stats[1].total // 2 -- +1, >= ?
+	-- I'm not smart enough to start pairs() at 2. next(pairs())???
 	for i = 2, #hand_color_stats do
-		if hand_color_stats[i]/hand_color_stats[1] > 0.50 then
+		if hand_color_stats[i].color > threshold then
 			table.insert(colors, hand_color_stats[i].color)
 		end
 	end
 end
+
 
 local function analyze(playable)
 	-- gather intel
@@ -224,21 +229,21 @@ local function analyze(playable)
 	local least_cards = #players[turn].hand
 
 	local intel = {}
-	for i, v in ipairs(players) do
+	for i, p in ipairs(players) do
 		if i ~= turn then
 			-- thankfully our data on other players is VERY limited
 			table.insert(intel, {
-				winning=#v.hand <= PANIC_THRESHOLD,
+				winning=#p.hand <= PANIC_THRESHOLD,
 				most_winning=false, -- touch up after the fact
-				total=#v.hand, -- ugh I'll need it for nuance
-				id=v.id,
+				total=#p.hand, -- ugh I'll need it for nuance
+				id=p.id,
 				-- we are n away from ourself (if included)
-				distance=(((turn - 1) + order * v.id) % #players) + 1,
+				distance=(((turn - 1) + order * p.id) % #players) + 1,
 			})
 			us_losing = us_losing or intel[#intel].winning
-			us_most_winning = us_most_winning and #players[turn].hand <= #v.hand
-			if #v.hand < least_cards then
-				least_cards = #v.hand
+			us_most_winning = us_most_winning and #players[turn].hand <= #p.hand
+			if #p.hand < least_cards then
+				least_cards = #p.hand
 			end
 		end
 	end
@@ -292,18 +297,16 @@ local function analyze(playable)
 	-- big brain, playable_z is strictly worse than hand_z because it's deduplicated
 	local playable_color_stats, playable_color_map = get_color_stats(playable)
 
-	if current_color == nil then
-		-- literally only wildstart
-		-- this is so rare it's a near meaningless choice
-		-- just pick a normie card from the highest color
-		--  but also you could have no normie cards
-		--  and lol you could have literally every other wild
-		-- logic should look like, if not be identical to, wild color selection
-	end
-
 	-- there is NO reason to consider Z in hand_color UNLESS you're in 2p fishing for Wz combos
 	--  or, perhaps, in panic
 	local hand_color_stats, hand_color_map, hand_z = get_color_stats(players[turn].hand)
+	
+	local color_choices = get_good_colors(hand_color_stats)
+	
+	-- BAD NEWS: Card choices made randomly from playable is statistically deficient
+	--  deduplication is skewing the selection
+	-- UH-OH IT ALSO SKEWS GOOD COLOR SELECTION
+	-- FIXME: I'm not doing THIS today
 
 	if #hand_color_stats == 0 then
 		if hand_z == nil then
@@ -327,9 +330,25 @@ local function analyze(playable)
 			to_play = 'Xz'
 		end
 
-		-- function, get_comperable, find list of colors that are within a tolerance (1? 2?)
-		--  maybe have a floor as well to keep you from considering a color with, like, 1 is good
-		-- use with wildstart as well
+		return to_play .. color_choices(math.random(#color_choices))
+	end
+
+	-- CONFIRMED, HAVE A NON-Z TO PLAY *SOMEWHERE*
+	if current_color == nil then
+		-- literally only wildstart
+		-- this is so rare it's a near meaningless choice
+		-- just pick a normie card from the highest color
+		--  but also you could have no normie cards
+		-- logic should look like, if not be identical to, wild color selection
+		-- LOVE TO INDEX
+		local color_choice = hand_color_stats[hand_color_map[color_choices[math.random(#color_choices)]]]
+		-- it's worth considering merging them when making a choice like this of little consequence
+		-- but that's work and this is literally only wildstart
+		if #color_choice.normal ~= 0 then
+			return color_choice.normal[math.random(#color_choice.normal)]
+		else
+			return color_choice.special[math.random(#color_choice.normal)]
+		end
 	end
 
 	-- you are not allowed to complain about variable names
@@ -418,8 +437,8 @@ local function find_winner()
 		end
 	end
 	local winners = {}
-	for i, v in ipairs(players) do
-		if #v.hand == min_hand then
+	for i, p in ipairs(players) do
+		if #p.hand == min_hand then
 			table.insert(winners, i)
 		end
 	end
@@ -538,7 +557,7 @@ local function draw_playable()
 			-- by the time I found out I could raise it only made the code messier :(
 			return nil
 		end
-		table.append(players[turn].hand, card)
+		table.insert(players[turn].hand, card)
 		if is_playable(card) then
 			break
 		end
