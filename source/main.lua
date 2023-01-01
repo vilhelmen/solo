@@ -117,6 +117,20 @@ local function initialize(player_count)
 end
 
 
+local function deduplicate_cards(card_pile)
+	-- deduplicate a list of cards
+	local singles = {}
+	for _, v in pairs(card_pile) do
+		singles[v] = true -- I can't imagine a value that would matter/save time
+	end
+	local dedupe = {}
+	for v, _ in pairs(singles) do
+		table.insert(dedupe, v)
+	end
+	return dedupe
+end
+
+
 local function is_normal(card)
 	-- technically we don't have anything below '0' at the moment since + is now X
 	return card:sub(1) <= '9' and card:sub(1) >= '0'
@@ -177,9 +191,6 @@ local function get_color_stats(card_pile)
 	return color_log, index_map, z_log
 end
 
--- UHHHHH stomp over the card code if it's wild and the color has been selected?
--- but then you need to remember to reset it
--- otherwise we need an external wild color tracker
 
 local function dump()
 	print('TOD: ', discard[#discard])
@@ -194,18 +205,12 @@ end
 
 local function get_good_colors(hand_color_stats)
 	-- return color codes (desc) that are comparable in size to the largest
-	-- what if it's, like, 3, 1, 1. 1 is clearly bad
-	-- 4, 2, 2... still bad?
-	-- 5, 3, 3, still bad??
-	-- 3, 2, 2... ?
-	-- maybe it's a percentage.
-	-- 3, 1 is 1/3 - 5,3 is 3/5... strictly greater than 50%?
-	-- 6, 3, 3? 10 4 4? 10, 6, 5...
-	-- what's better, > 0.50 (oh no float precision) or uhhhhh math.ceil(n/2)?
-	-- int comparison seems nicer
+	-- big brain time, if you have > 50% as many red as blue, then both look good
+	-- 6 and 2? Totally unequal. 6 and 3? close but eh. 6 and 4? sure!
+	-- 100 and 51? ehhh
 	local colors = {hand_color_stats[1].color} -- should probably check if this is empty
 	local threshold = hand_color_stats[1].total // 2 -- +1, >= ?
-	-- I'm not smart enough to start pairs() at 2. next(pairs())???
+	-- I'm not smart enough to start pairs() at 2. next(pairs())??? (no)
 	for i = 2, #hand_color_stats do
 		if hand_color_stats[i].color > threshold then
 			table.insert(colors, hand_color_stats[i].color)
@@ -215,17 +220,29 @@ end
 
 
 local function analyze(playable)
-	-- gather intel
-	-- flag everyone near winning
-	-- figure out which turn order is better
-	-- figure out skip/draw/wild strats
-	-- build hand plan?
+	-- do, like, everything
 
-	-- TODO: move draw_playable to here
-	-- UGH just putting this here for now
-	--  playable isn't deduplicated, so this is 50% less useful
-	if #playable == 1 then
-		return playable[1]
+	-- Uhhh don't draw here because it complicates the return
+	--  if we gotta return a winner
+	--  unless we switch back to exceptions. Or I just return a second thing.
+	-- but a draw coming into here will short circuit:
+
+	-- we really only have one option
+	local deduplicated_playable = deduplicate_cards(playable)
+	if #deduplicated_playable == 1 then
+		-- but it might be a wild
+		if deduplicated_playable[1]:sub(2) ~= 'z' then
+			return deduplicated_playable[1]
+		end
+
+		local good_colors = get_good_colors(get_color_stats())
+		-- ...and we may only have wilds in our hand (this may be the last card)
+		if #good_colors ~= 0 then
+			-- it HAS to go into a variable to be used
+			-- 'rgby':sub(math.random(4)) is illegal
+			good_colors = {'r', 'g', 'b', 'y'}
+		end
+		return deduplicated_playable[1] .. good_colors[math.random(#good_colors)]
 	end
 
 	local us_losing = false -- panic
@@ -294,6 +311,7 @@ local function analyze(playable)
 	local current_color = discard[#discard]:sub(2)
 	if current_color == 'z' then
 		current_color = discard[#discard]:sub(3)
+		-- we may still be wildstart, but we need more hand info before we can handle it
 	end
 
 	local to_play = nil
@@ -308,13 +326,7 @@ local function analyze(playable)
 	-- TODO: let this return a list of cards in 2p mode?
 	--  loop outside play_card and raise if turn changes?
 	local hand_color_stats, hand_color_map, hand_z = get_color_stats(players[turn].hand)
-	
 	local color_choices = get_good_colors(hand_color_stats)
-	
-	-- BAD NEWS: Card choices made randomly from playable is statistically deficient
-	--  deduplication is skewing the selection
-	-- UH-OH IT ALSO SKEWS GOOD COLOR SELECTION
-	-- FIXME: I'm not doing THIS today
 
 	if #hand_color_stats == 0 then
 		if hand_z == nil then
@@ -339,12 +351,6 @@ local function analyze(playable)
 
 		return to_play .. color_choices(math.random(#color_choices))
 	end
-	
-	-- TODO: Deduplicated view into playable? It eases some selection^[citation needed]
-	-- would be nice to know if we really don't have much of a choice in selection.
-	--  deduplicate and then flatten each color_state normie/special?
-	--  one chunk = one category of card
-	--  but could still be special, which requires discrimnination at times
 
 	-- CONFIRMED, HAVE A NON-Z TO PLAY *SOMEWHERE*
 	if current_color == nil then
@@ -364,10 +370,18 @@ local function analyze(playable)
 		end
 	end
 
+	-- as of here, we have at least two distinct cards
+	--  spread across at least one color, which may or may not be the current color
+	--  and we may or may not have wilds (but an all wild has been handled)
+	-- good luck
+
 	local can_jump = #color_choices > 1
-	local should_jump -- current is not the most, with minor leeway (at LEAST 1 b/c totals post-play)
-	-- note: not wild-inclusive ^^
-	-- need to discriminate special/normie jumps? It could consume a valuable card.
+	local only_jump = playable_color_map[current_color] == nil -- current color not in index
+	local should_jump -- UHHH the inverse of good_colors? Any color that has (strictly?) more cards
+
+	-- IN THEORY, we should only have one card of each jumpable color
+	--  wildstart has been handled, and we can only jump if the symbol matches
+	--  We could be burning something of value in order to jump
 
 	if not panic then
 		-- check if we should jump colors (if possible)
@@ -582,7 +596,7 @@ while true do
 	local playable, mask = get_playable()
 
 	if #playable == 0 then
-		-- playable and mask are now garbage
+		-- mask is garbage now
 		local drawn = draw_playable()
 		forced_play = true
 		if played == nil then
