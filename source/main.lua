@@ -382,7 +382,9 @@ local function analyze(playable)
 	--  spread across at least one color, which may or may not be the current color
 	-- good luck
 
-	-- identify_jumpable() ?
+	-- FIXME(?): WHOOPS non-panic logic doesn't look at do_ flags
+	-- Generate a random order of potential cards and filter on do_s?
+	--  if we're not in panic, then nothing should be (immediately) fatal, thankfully
 
 	-- local can_jump = #good_colors > 1 -- not wholly accurate since it's using good_colors
 	local only_jump = playable_color_map[current_color] == nil -- current color not in index
@@ -404,7 +406,6 @@ local function analyze(playable)
 		return get_good_color_card(good_colors, hand_color_stats, hand_color_map)
 	end
 
-
 	-- UHHH the inverse of good_colors? Any color that has (strictly?) more cards
 	--  but what if we only have one left of the current color. or 2?
 	-- should jump if any color with a higher color map index number exists in playable
@@ -414,33 +415,39 @@ local function analyze(playable)
 	--  wildstart has been handled, and we can only jump if the symbol matches
 	--  We could be burning something of value in order to jump
 
-	if not panic then
-		-- we have no real reason to switch colors, time for idle play
-		-- normie -> special? normie + special? normie + special %?
-		-- just compute a quick index number. is this random enough?
-		--  the card order is vaguely fixed, but the index is random so it doesn't matter
-		local normal = #hand_color_stats[hand_color_map[current_color]].normal
-		local total = normal
-		if total == 0 or math.random(3) == 3 then
-			-- whoops and/or hurray throw in special cards
-			total = total + #hand_color_stats[hand_color_map[current_color]].special
-		end
-		local selected = math.random(total)
-		if selected > normal then
-			-- rolled into special, shift the index
-			return hand_color_stats[hand_color_map[current_color]].special[selected - normal]
-		else
-			return hand_color_stats[hand_color_map[current_color]].normal[selected]
-		end
-	else
+	if panic then
 		-- FRICK. have to rank our options
-		-- we may or may not should jump
+		-- we may or may not want to jump
 		-- we may or may not want to punish
 		-- we may or may not want to skip
+		--  skip doesn't necessarily imply punish but it would work as one...
+		--   but is burning a draw worth it?
 		-- we may or may not want to reverse
 		-- but what's the order?
+		--  The problem is that a punish is a skip in all cases.
+		--  a jump MAY satisfy another desire as well, so we should check for jumps
+		-- If we can't satisfy any of our do_s then consider a jump
+		--  and if THAT isn't an option (a jump card (therefore all) are of a bad type)
+		--   fall back to idle play. idle play may result in bad specials?
 	end
 
+	-- we have no real reason to switch colors, time for idle play
+	-- normie -> special? normie + special? normie + special %?
+	-- just compute a quick index number. is this random enough?
+	--  the card order is vaguely fixed, but the index is random so it doesn't matter
+	local normal = #hand_color_stats[hand_color_map[current_color]].normal
+	local total = normal
+	if total == 0 or math.random(3) == 3 then
+		-- whoops and/or hurray throw in special cards
+		total = total + #hand_color_stats[hand_color_map[current_color]].special
+	end
+	local selected = math.random(total)
+	if selected > normal then
+		-- rolled into special, shift the index
+		return hand_color_stats[hand_color_map[current_color]].special[selected - normal]
+	else
+		return hand_color_stats[hand_color_map[current_color]].normal[selected]
+	end
 end
 
 
