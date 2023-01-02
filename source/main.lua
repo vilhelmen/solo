@@ -342,7 +342,6 @@ local function analyze(playable)
 	end
 
 	local to_play = nil
-	-- local priority_list = {}
 
 	-- big brain, playable_z is strictly worse than hand_z because it's deduplicated
 	local playable_color_stats, playable_color_map = get_color_stats(playable)
@@ -394,7 +393,7 @@ local function analyze(playable)
 	--  set holdout to random chance, say 80%?
 	--   I don't like the idea of jumping if it was literally the last of that color tho
 	--    IDK!
-	-- if it's not a good color, we know we have at least double of the other color
+	-- if it's not a good color, we know we have at least double of another playable(?) color
 	--  maybe that plays into holdout, some sort of sliding % based on current total
 	--   but also, 1 and 2 cards is the borderline of panic
 
@@ -416,24 +415,32 @@ local function analyze(playable)
 	--  We could be burning something of value in order to jump
 
 	if not panic then
-		-- check if we should jump colors (if possible)
-		
-		
-		
-		-- if that's not interesting, just play whatever we have in the current color, snore
-		--  if we have no normies, or on % chance, add specials into the choice
-		
+		-- we have no real reason to switch colors, time for idle play
+		-- normie -> special? normie + special? normie + special %?
+		-- just compute a quick index number. is this random enough?
+		--  the card order is vaguely fixed, but the index is random so it doesn't matter
+		local normal = #hand_color_stats[hand_color_map[current_color]].normal
+		local total = normal
+		if total == 0 or math.random(3) == 3 then
+			-- whoops and/or hurray throw in special cards
+			total = total + #hand_color_stats[hand_color_map[current_color]].special
+		end
+		local selected = math.random(total)
+		if selected > normal then
+			-- rolled into special, shift the index
+			return hand_color_stats[hand_color_map[current_color]].special[selected - normal]
+		else
+			return hand_color_stats[hand_color_map[current_color]].normal[selected]
+		end
 	else
-		-- FRICK. have to rank our options vs do_ codes
+		-- FRICK. have to rank our options
+		-- we may or may not should jump
+		-- we may or may not want to punish
+		-- we may or may not want to skip
+		-- we may or may not want to reverse
+		-- but what's the order?
 	end
 
-	-- if we can play a normal card, then ignore z? Unless panic and Xz?
-
-	-- rank all specials according to panic logic and play first that exists?
-	-- specials could still be cross-color, need color state and crossing data
-	-- if we're not panic, ignore specials? Low-rank them?
-	
-	-- lol fun idea, bots get a boredom counter that makes them play specials with increasing %
 end
 
 
