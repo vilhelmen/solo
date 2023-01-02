@@ -5,7 +5,7 @@ local table = require "table"
 
 math.randomseed(0) -- TODO: switch with appropriate playdate stuff, maybe a debug toggle as well
 
-local PANIC_THRESHOLD = 3  -- 4 or 3????
+local PANIC_THRESHOLD = 3  -- 4 or 3???? 4-(n//2)? (n//2)+2?
 
 local DEFAULT_SORT = nil -- it just works
 -- fix color ordering with a map?
@@ -219,6 +219,32 @@ local function get_good_colors(hand_color_stats)
 end
 
 
+local function get_good_color_card(good_colors, hand_color_stats, hand_color_map)
+	-- picks a card from a good color. prefers normies.
+	local color_choice = hand_color_stats[hand_color_map[good_colors[math.random(#good_colors)]]]
+	if #color_choice.normal ~= 0 then
+		return color_choice.normal[math.random(#color_choice.normal)]
+	else
+		return color_choice.special[math.random(#color_choice.special)]
+	end
+end
+
+local function is_not_in(list, object)
+	-- LUA PLEASE
+	for _, v in ipairs(list) do
+		if v == object then
+			return false
+		end
+	end
+	return true
+end
+
+-- UGH IN IS A RESERVED WORD
+local function is_in(list, object)
+	return not is_not_in(list, object)
+end
+
+
 local function analyze(playable)
 	-- do, like, everything
 
@@ -279,6 +305,7 @@ local function analyze(playable)
 	table.sort(intel, function(a, b) return a.distance < b.distance end)
 
 	local panic = us_losing or not us_most_winning -- we are, in fact, having a bad time
+	-- remove most_winning override? Don't get complacent!
 	local do_punish = intel[1].winning -- attack - basically the same as skip if draw is skip
 	local do_skip = false -- attack by defending (lol)
 	local do_reverse = false -- defend
@@ -326,7 +353,7 @@ local function analyze(playable)
 	-- TODO: let this return a list of cards in 2p mode?
 	--  loop outside play_card and raise if turn changes?
 	local hand_color_stats, hand_color_map, hand_z = get_color_stats(players[turn].hand)
-	local color_choices = get_good_colors(hand_color_stats)
+	local good_colors = get_good_colors(hand_color_stats)
 
 	if #hand_color_stats == 0 then
 		if hand_z == nil then
@@ -349,35 +376,40 @@ local function analyze(playable)
 			to_play = 'Xz'
 		end
 
-		return to_play .. color_choices(math.random(#color_choices))
+		return to_play .. good_colors[math.random(#good_colors)]
 	end
 
-	-- CONFIRMED, HAVE A NON-Z TO PLAY *SOMEWHERE*
-	if current_color == nil then
-		-- literally only wildstart
-		-- this is so rare it's a near meaningless choice
-		-- just pick a normie card from the highest color
-		--  but also you could have no normie cards
-		-- logic should look like, if not be identical to, wild color selection
-		-- LOVE TO INDEX
-		local color_choice = hand_color_stats[hand_color_map[color_choices[math.random(#color_choices)]]]
-		-- it's worth considering merging them when making a choice like this of little consequence
-		-- but that's work and this is literally only wildstart
-		if #color_choice.normal ~= 0 then
-			return color_choice.normal[math.random(#color_choice.normal)]
-		else
-			return color_choice.special[math.random(#color_choice.normal)]
-		end
-	end
-
-	-- as of here, we have at least two distinct cards
+	-- as of here, we have at least two distinct cards at least one of which is non-z
 	--  spread across at least one color, which may or may not be the current color
-	--  and we may or may not have wilds (but an all wild has been handled)
 	-- good luck
 
-	local can_jump = #color_choices > 1
+	-- identify_jumpable() ?
+
+	-- local can_jump = #good_colors > 1 -- not wholly accurate since it's using good_colors
 	local only_jump = playable_color_map[current_color] == nil -- current color not in index
-	local should_jump -- UHHH the inverse of good_colors? Any color that has (strictly?) more cards
+	local should_jump = is_not_in(good_colors, current_color) and
+		(playable_color_stats[playable_color_map[current_color]].total > 2 or math.random(5) == 5) and
+		playable_color_stats[playable_color_map[current_color]].total ~= 1
+	-- we may not be in the top color, but we're comparable. But hold out if we only have <= two left
+	--  set holdout to random chance, say 80%?
+	--   I don't like the idea of jumping if it was literally the last of that color tho
+	--    IDK!
+	-- if it's not a good color, we know we have at least double of the other color
+	--  maybe that plays into holdout, some sort of sliding % based on current total
+	--   but also, 1 and 2 cards is the borderline of panic
+
+	-- I feel like panic should override should_jump maybe? But only if we have a strategic play?
+	--  one could consider a color change strategic tho, but is it better than direct punishment (if available)
+	if only_jump or current_color == nil or (should_jump and not panic) then
+		-- none of current color, or wildstart, or current color is not good
+		return get_good_color_card(good_colors, hand_color_stats, hand_color_map)
+	end
+
+
+	-- UHHH the inverse of good_colors? Any color that has (strictly?) more cards
+	--  but what if we only have one left of the current color. or 2?
+	-- should jump if any color with a higher color map index number exists in playable
+	--  AND we aren't sufficiently low on the current
 
 	-- IN THEORY, we should only have one card of each jumpable color
 	--  wildstart has been handled, and we can only jump if the symbol matches
