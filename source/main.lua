@@ -304,35 +304,67 @@ local function analyze(playable)
 	-- sort by distance from us. we may need a mapping to total cards ordering... or just copy it
 	table.sort(intel, function(a, b) return a.distance < b.distance end)
 
+	-- FIXME: was this supposed to be an and? vvv Maybe just remove back half?
 	local panic = us_losing or not us_most_winning -- we are, in fact, having a bad time
 	-- remove most_winning override? Don't get complacent!
-	local do_punish = intel[1].winning -- attack - basically the same as skip if draw is skip
-	local do_skip = false -- attack by defending (lol)
-	local do_reverse = false -- defend
+	local do_punish = intel[1].winning -- next player is critical
+	local do_skip, skip_fatal
+	local do_reverse, reverse_fatal
+	-- do = true == good idea
+	-- do = false ~~ actively bad???
+	-- fatal = SUPER don't pls, turbo veto
+
+	-- normie_fatal? If the next player has one card, all other flags are already set
+
 	-- all draws are skips which makes punish/skip fights frustrating
 	-- combine skip/punish?
 
-	-- skips are better than reverse (unless it makes us beef it directly ("notable" difference in total?))
-	--  because it minimizes turns
+	-- punish (if also skip? if non-fatal?) > skip > reverse unless fatal veto
+	-- a wilddraw IS a skip which is a minor wrench
+
+	-- at a threshold of 3, the distance between (do_punish + do_skip) and skip_fatal is VERY slim
+	-- punish doesn't IMPLY skip but it's REALLY close. I just don't know what to do about it
+	-- X, 3, 3 = do skip
+	-- X, 3, 2 = don't skip
+	-- X, 3, 1 = don't skip, fatal
+	-- X, 2, 3 = do skip
+	-- X, 2, 2 = do skip (this seems worse than 3, 3. More like a can_skip)
+	-- X, 2, 1 = don't skip, fatal
+	-- X, 1, 3 = do skip
+	-- X, 1, 2 = do skip
+	-- X, 1, 1 = do skip, fatal
+	-- it's basically 50/50 when nonfatal. 2, 2 is so iffy
 
 	if #intel == 3 then
 		-- don't skip if the person we jump to is better off... but what about the person after THEM
 		--  a turn, in theory, is -1 to all. Skipping blocks their -1
 		--  but what if the third is about to win, we want to maximize turns before them?
-		do_skip = intel[2].total > intel[1].total and intel[1].total <= intel[3].total
-		-- don't reverse if the reverse is doing better under panic
-		do_reverse = intel[#intel].total > intel[1].total
+		--  FIXME: I'm ignoring the fourth for now because ?
+		do_skip = intel[2].total >= intel[1].total -- and intel[1].total <= intel[3].total
+		skip_fatal = intel[2].total == 1
+
+		-- don't reverse if the reverse is doing better. If it's equal, spice it up
+		do_reverse = intel[3].total > intel[1].total or (intel[3].total == intel[1].total and math.random(2) == 2)
+		reverse_fatal = intel[3].total == 1
 	elseif (#intel == 2) then
-		-- don't skip to someone of higher criticality, ideally
-		-- these rules only really apply under panic
-		do_skip = intel[2].total > intel[1].total
-		do_reverse = intel[#intel].total > intel[1].total
+		-- don't skip to someone of higher criticality, ideally.
+		-- Since there's no fourth this is an easier decision
+		-- if it's == it's still strictly good to skip?
+		--  it attacks the next BUT saves the one after that
+		do_skip = intel[2].total >= intel[1].total
+		skip_fatal = intel[2].total == 1
+
+		-- don't reverse if the reverse is doing better. If it's equal, spice it up
+		do_reverse = intel[2].total > intel[1].total or (intel[2].total == intel[1].total and math.random(2) == 2)
+		reverse_fatal = intel[#intel].total == 1
 	else
 		do_punish = true -- get dunked on. There's one enemy and it's you :dagger:
 		do_skip = true -- always good
+		skip_fatal = false
 		do_reverse = not panic -- or us_most_winning
+		reverse_fatal = intel[1].total == 1
 		-- at BEST it's not helpful... 2p-normification is needed
-		-- ^ this ^ probably won't get picked up right, make it trinary? Check player count on read?
+		-- FIXME: if the logic isn't tweaked, reverse play is going to be avoided until panic where it's actively unhelpful
 	end
 
 	local current_color = discard[#discard]:sub(2)
@@ -367,7 +399,9 @@ local function analyze(playable)
 		-- a later +4 minimizes their average play space
 
 		-- I do no like manufacturing the card code
-		if do_punish and hand_z.X then
+		if do_punish and hand_z.X and not skip_fatal then
+			-- no do_skip check here because I say so. if it's not fatal and we want to punish, EH.
+			--  we don't have much choice
 			to_play = 'Xz'
 		elseif (hand_z.W) then
 			to_play = 'Wz'
@@ -416,25 +450,25 @@ local function analyze(playable)
 	--  We could be burning something of value in order to jump
 
 	if panic then
-		-- FRICK. have to rank our options
-		-- we may or may not want to jump
-		-- we may or may not want to punish
-		-- we may or may not want to skip
-		--  skip doesn't necessarily imply punish but it would work as one...
-		--   but is burning a draw worth it?
-		-- we may or may not want to reverse
-		-- but what's the order?
-		--  The problem is that a punish is a skip in all cases.
-		--  a jump MAY satisfy another desire as well, so we should check for jumps
-		-- If we can't satisfy any of our do_s then consider a jump
+		-- Unlocking the weapons case!
+		-- punish (+ skip???) > skip > reverse
+		--  A jump can co-occur so we should always check it's an option and take jump advice into consideration
+		-- If we can't satisfy any of our do_s then consider any non-fatal jump
 		--  and if THAT isn't an option (a jump card (therefore all) are of a bad type)
-		--   fall back to idle play. idle play may result in bad specials?
+		--   fall back to idle play logic. idle play may result in bad specials?
+
+		-- NEW IDEA, place all playables in a list specifically sorted(? D, S, R, nomrie?)
+		-- if it's good, put it in a good list
+		-- if it violates a rule or desire, throw it in a trash list
+		-- if it's fatal, basically ban it (but have to hold onto it in case we're boned)
+		-- pick from the lists in order of desperation
 	end
 
 	-- we have no real reason to switch colors, time for idle play
 	-- normie -> special? normie + special? normie + special %?
 	-- just compute a quick index number. is this random enough?
 	--  the card order is vaguely fixed, but the index is random so it doesn't matter
+	-- FIXME: idle play with specials can violate do flags (but not fatal because fatal implies panic)
 	local normal = #hand_color_stats[hand_color_map[current_color]].normal
 	local total = normal
 	if total == 0 or math.random(3) == 3 then
