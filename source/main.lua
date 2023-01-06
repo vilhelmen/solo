@@ -404,7 +404,7 @@ local function analyze(playable)
 		if do_punish and #hand_z.X ~= 0 and not skip_fatal then
 			-- no do_skip check here because I say so. if it's not fatal and we want to punish, EH.
 			--  we don't have much choice
-			to_play = hand_x.X[1]
+			to_play = hand_z.X[1]
 		else
 			to_play = hand_z.W[1] or hand_z.X[1]
 		end
@@ -449,7 +449,7 @@ local function analyze(playable)
 	--  wildstart has been handled, and we can only jump if the symbol matches
 	--  We could be burning something of value in order to jump
 
-	if panic then
+	if true then
 		-- Unlocking the weapons case!
 		-- punish (+ skip???) > skip > reverse
 		--  A jump can co-occur so we should always check it's an option and take jump advice into consideration
@@ -463,16 +463,103 @@ local function analyze(playable)
 		-- if it violates a rule or desire, throw it in a trash list
 		-- if it's fatal, basically ban it (but have to hold onto it in case we're boned)
 		-- pick from the lists in order of desperation
-		local good_cards, boring_cards, bad_cards, fatal_cards = {}, {}, {}, {}
-		-- sorting through the color variants is gonna be a pain
-		
+		local card_bins = {{},{},{},{}}
+		-- local good_cards, boring_cards, bad_cards, fatal_cards = {}, {}, {}, {}
+		-- 1 = ideal wrt flags
+		-- 2 = normies(?)
+		-- 3 = against flags
+		-- 4 = NONONO
+
+		-- I don't want to have to check this a million times
+		-- we want to iterate through all playable colors in good order, which is to say playable_color_map order
+		local is_good_color = {} --, is_current_color, color_order = {}, {}, {}
+		-- color_order is directly indexable into playable stats
+		for k, v in pairs(playable_color_map) do
+			is_good_color[k] = is_in(good_colors, k)
+			-- is_current_color[k] = current_color == k
+			-- color_order[v] = k
+		end
+
+		-- FIXME: pairs() does not go in numerical order and idk if I knew that, check everything
+		-- FIXME: this should be a function but DAMN the number of arguments
+		-- FIXME: Should a bad color banish a card that otherwise we should do? Seems bad.
+		local fate
+
+		-- DRAW
+		for _, color_data in ipairs(playable_color_map) do
+			if #color_data.D ~= 0 then
+				if skip_fatal then
+					-- table.move isn't ACTUALLY a move
+					fate = 4
+				elseif not is_good_color[color_data.color] then
+					fate = 3
+				elseif not do_punish then
+					if do_skip then
+						fate = 2
+					else
+						fate = 3
+					end
+				else
+					-- ??? do punish, not fatal, good color
+					fate = 1
+				end
+				table.move(card_bins[fate], 1, #color_data.D, card_bins[fate] + 1)
+			end
+		end
+
+		-- SKIP
+		for _, color_data in ipairs(playable_color_map) do
+			if #color_data.S ~= 0 then
+				if skip_fatal then
+					fate = 4
+				elseif not is_good_color[color_data.color] or not do_skip then
+					fate = 3
+				else
+					fate = 1
+				end
+				table.move(card_bins[fate], 1, #color_data.S, card_bins[fate] + 1)
+			end
+		end
+
+		-- REVERSE
+		for _, color_data in ipairs(playable_color_map) do
+			if #color_data.R ~= 0 then
+				if reverse_fatal then
+					fate = 4
+				elseif not is_good_color[color_data.color] or not do_reverse then
+					fate = 3
+				else
+					-- -punish +skip good color draws will end up after good color reverses
+					--  AT BEST rank 2, If the bad color draws will be further bumped so the good color reverse will still play
+					fate = 2
+				end
+				table.move(card_bins[fate], 1, #color_data.R, card_bins[fate] + 1)
+			end
+		end
+
+		-- NORMIE
+		for _, color_data in ipairs(playable_color_map) do
+			if #color_data.normal ~= 0 then
+				-- I think they're all just ok?
+				table.move(card_bins[2], 1, #color_data.normal, card_bins[fate] + 1)
+			end
+		end
+
+		-- pick first from first available bin
+		-- consider randomizing bins 3 and 4 draws?
+		for _, bin in ipairs(card_bins) do
+			if #bin ~= 0 then
+				return bin[1]
+			end
+		end
 	end
 
 	-- we have no real reason to switch colors, time for idle play
 	-- normie -> special? normie + special? normie + special %?
 	-- just compute a quick index number. is this random enough?
 	--  the card order is vaguely fixed, but the index is random so it doesn't matter
-	-- FIXME: idle play with specials can violate do flags (but not fatal because fatal implies panic)
+	-- FIXME(?): idle play with specials can violate do flags (but not fatal because fatal implies panic)
+	--  this would be awfully rare in practice so it's probably fine
 	local normal = #hand_color_stats[hand_color_map[current_color]].normal
 	local total = normal
 	if total == 0 or math.random(3) == 3 then
