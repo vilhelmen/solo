@@ -177,7 +177,7 @@ local function get_color_stats(card_pile)
 	end
 
 	-- pruning post-sort because I'm a terrible person
-	table.sort(color_log, function(a, b) return a.total < b.total end)
+	table.sort(color_log, function(a, b) return a.total > b.total end)
 	while color_log[#color_log].total == 0 do
 		table.remove(color_log)
 	end
@@ -212,7 +212,7 @@ local function get_good_colors(hand_color_stats)
 	local threshold = hand_color_stats[1].total // 2 -- +1, >= ?
 	-- I'm not smart enough to start pairs() at 2. next(pairs())??? (no)
 	for i = 2, #hand_color_stats do
-		if hand_color_stats[i].color > threshold then
+		if hand_color_stats[i].total > threshold then
 			table.insert(colors, hand_color_stats[i].color)
 		end
 	end
@@ -449,6 +449,14 @@ local function analyze(playable)
 	--  wildstart has been handled, and we can only jump if the symbol matches
 	--  We could be burning something of value in order to jump
 
+	-- NEW IDEA, place all playables in a list specifically sorted(? D, S, R, nomrie?)
+	-- if it's good, put it in a good list
+	-- if it violates a rule or desire, throw it in a trash list
+	-- if it's fatal, basically ban it (but have to hold onto it in case we're boned)
+	-- pick from the lists in order of desperation
+	local good_cards, bad_cards, fatal_cards = {}, {}, {}
+	-- sorting through the color variants is gonna be a pain
+
 	if panic then
 		-- Unlocking the weapons case!
 		-- punish (+ skip???) > skip > reverse
@@ -456,12 +464,9 @@ local function analyze(playable)
 		-- If we can't satisfy any of our do_s then consider any non-fatal jump
 		--  and if THAT isn't an option (a jump card (therefore all) are of a bad type)
 		--   fall back to idle play logic. idle play may result in bad specials?
-
-		-- NEW IDEA, place all playables in a list specifically sorted(? D, S, R, nomrie?)
-		-- if it's good, put it in a good list
-		-- if it violates a rule or desire, throw it in a trash list
-		-- if it's fatal, basically ban it (but have to hold onto it in case we're boned)
-		-- pick from the lists in order of desperation
+		
+		-- Ok, check in order, but prefer jump version if should_jump
+		-- good_colors are in order, but the current color could be anywhere in there or not at all
 	end
 
 	-- we have no real reason to switch colors, time for idle play
