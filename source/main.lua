@@ -13,10 +13,10 @@ local DEFAULT_SORT = nil -- it just works
 --  ........ but also we don't have a color display
 --  colors are just, like, your opinion, man
 local function DISPLAY_SORT(a, b)
-	if a:sub(2) < b:sub(2) then
+	if a:sub(2,2) < b:sub(2,2) then
 		return true
-	elseif (a:sub(2) == b:sub(2)) then
-		return a:sub(1) < b:sub(1)
+	elseif (a:sub(2,2) == b:sub(2,2)) then
+		return a:sub(1,1) < b:sub(1,1)
 	else
 		return false
 	end
@@ -133,7 +133,7 @@ end
 
 local function is_normal(card)
 	-- technically we don't have anything below '0' at the moment since + is now X
-	return card:sub(1) <= '9' and card:sub(1) >= '0'
+	return card:sub(1,1) <= '9' and card:sub(1,1) >= '0'
 end
 
 local function is_special(card)
@@ -145,11 +145,12 @@ local function get_color_stats(card_pile)
 	-- returns playable color breakdown, color map, and z breakdown
 	-- reminder that playable is deduplicated
 	local color_log = { -- no need for special if we have the flags?
-		{normal={}, special={}, D=false, R=false, S=false, color='r', total=0};
-		{normal={}, special={}, D=false, R=false, S=false, color='g', total=0};
-		{normal={}, special={}, D=false, R=false, S=false, color='b', total=0};
-		{normal={}, special={}, D=false, R=false, S=false, color='y', total=0};
-		{normal={}, special={}, W=false, X=false, color='z', total=0}
+		-- LUA PLS, I just want to be able to concat tables. IF I can't D .. R .. S, we're keepin special
+		{normal={}, special={}, D={}, R={}, S={}, color='r', total=0};
+		{normal={}, special={}, D={}, R={}, S={}, color='g', total=0};
+		{normal={}, special={}, D={}, R={}, S={}, color='b', total=0};
+		{normal={}, special={}, D={}, R={}, S={}, color='y', total=0};
+		{normal={}, special={}, W={}, X={}, color='z', total=0}
 	} -- z normal list for easier processing
 	local index_map = {r=1, g=2, b=3, y=4, z=5}
 
@@ -160,12 +161,12 @@ local function get_color_stats(card_pile)
 
 	for _, v in pairs(card_pile) do
 		if is_normal(v) then -- no z is normal
-			table.insert(color_log[index_map[v:sub(2)]].normal, v)
+			table.insert(color_log[index_map[v:sub(2,2)]].normal, v)
 		else
-			table.insert(color_log[index_map[v:sub(2)]].special, v)
-			color_log[index_map[v:sub(2)]][v:sub(1)] = true
+			table.insert(color_log[index_map[v:sub(2,2)]].special, v)
+			table.insert(color_log[index_map[v:sub(2,2)]][v:sub(1,1)], v)
 		end
-		color_log[index_map[v:sub(2)]].total = color_log[index_map[v:sub(2)]].total + 1
+		color_log[index_map[v:sub(2,2)]].total = color_log[index_map[v:sub(2,2)]].total + 1
 	end
 
 	-- UGH z consistently clouds judgement, pull it out
@@ -257,7 +258,7 @@ local function analyze(playable)
 	local deduplicated_playable = deduplicate_cards(playable)
 	if #deduplicated_playable == 1 then
 		-- but it might be a wild
-		if deduplicated_playable[1]:sub(2) ~= 'z' then
+		if deduplicated_playable[1]:sub(2,2) ~= 'z' then
 			return deduplicated_playable[1]
 		end
 
@@ -367,9 +368,9 @@ local function analyze(playable)
 		-- FIXME: if the logic isn't tweaked, reverse play is going to be avoided until panic where it's actively unhelpful
 	end
 
-	local current_color = discard[#discard]:sub(2)
+	local current_color = discard[#discard]:sub(2, 1)
 	if current_color == 'z' then
-		current_color = discard[#discard]:sub(3)
+		current_color = discard[#discard]:sub(3, 1)
 		-- we may still be wildstart, but we need more hand info before we can handle it
 	end
 
@@ -399,14 +400,12 @@ local function analyze(playable)
 		-- a later +4 minimizes their average play space
 
 		-- I do no like manufacturing the card code
-		if do_punish and hand_z.X and not skip_fatal then
+		if do_punish and #hand_z.X ~= 0 and not skip_fatal then
 			-- no do_skip check here because I say so. if it's not fatal and we want to punish, EH.
 			--  we don't have much choice
-			to_play = 'Xz'
-		elseif (hand_z.W) then
-			to_play = 'Wz'
+			to_play = hand_x.X[1]
 		else
-			to_play = 'Xz'
+			to_play = hand_z.W[1] or hand_z.X[1]
 		end
 
 		return to_play .. good_colors[math.random(#good_colors)]
@@ -445,17 +444,9 @@ local function analyze(playable)
 	-- should jump if any color with a higher color map index number exists in playable
 	--  AND we aren't sufficiently low on the current
 
-	-- IN THEORY, we should only have one card of each jumpable color
+	-- IN THEORY, we should only have one symbol of each jumpable color
 	--  wildstart has been handled, and we can only jump if the symbol matches
 	--  We could be burning something of value in order to jump
-
-	-- NEW IDEA, place all playables in a list specifically sorted(? D, S, R, nomrie?)
-	-- if it's good, put it in a good list
-	-- if it violates a rule or desire, throw it in a trash list
-	-- if it's fatal, basically ban it (but have to hold onto it in case we're boned)
-	-- pick from the lists in order of desperation
-	local good_cards, bad_cards, fatal_cards = {}, {}, {}
-	-- sorting through the color variants is gonna be a pain
 
 	if panic then
 		-- Unlocking the weapons case!
@@ -463,10 +454,17 @@ local function analyze(playable)
 		--  A jump can co-occur so we should always check it's an option and take jump advice into consideration
 		-- If we can't satisfy any of our do_s then consider any non-fatal jump
 		--  and if THAT isn't an option (a jump card (therefore all) are of a bad type)
-		--   fall back to idle play logic. idle play may result in bad specials?
-		
 		-- Ok, check in order, but prefer jump version if should_jump
 		-- good_colors are in order, but the current color could be anywhere in there or not at all
+
+		-- NEW IDEA, place all playables in a list specifically sorted(? D, S, R, normie?)
+		-- if it's good, put it in a good list
+		-- if it violates a rule or desire, throw it in a trash list
+		-- if it's fatal, basically ban it (but have to hold onto it in case we're boned)
+		-- pick from the lists in order of desperation
+		local good_cards, boring_cards, bad_cards, fatal_cards = {}, {}, {}, {}
+		-- sorting through the color variants is gonna be a pain
+		
 	end
 
 	-- we have no real reason to switch colors, time for idle play
@@ -499,8 +497,8 @@ local function is_playable(card)
 	-- but also lol who cares
 	-- kinda ugly when called in a loop
 	local current = discard[#discard]
-	if (card:sub(2) == current:sub(2)) or (card:sub(1) == current:sub(1)) or
-			(card:sub(2) == 'z') or (card:sub(2) == current:sub(3)) then
+	if (card:sub(2,2) == current:sub(2,2)) or (card:sub(1,1) == current:sub(1,1)) or
+			(card:sub(2,2) == 'z') or (card:sub(2,2) == current:sub(3,3)) then
 		return true
 	else
 		return false
@@ -584,6 +582,7 @@ local function play_card(card)
 	-- Strip any 3codes
 	discard[#discard - 1] = string.sub(discard[#discard - 1], 1, 2)
 	card = string.sub(card, 1, 2)
+	-- FIXME, extract card symbol
 	-- sanity check for fake cards, bot logic may end up building card strings :/
 	local did_eject = false
 	for i = 1, #players[turn].hand do
@@ -611,16 +610,16 @@ local function play_card(card)
 	--  anyone can win when applying a draw
 	-- skip apply
 
-	if card:sub(1) == 'R' then
+	if card:sub(1,1) == 'R' then
 		order = order * -1
 	end
 
 	turn = (((turn - 1) + order) % #players) + 1
 
 	local to_draw = 0
-	if card:sub(1) == 'D' then
+	if card:sub(1,1) == 'D' then
 		to_draw = 2
-	elseif card:sub(1) == 'X' then
+	elseif card:sub(1,1) == 'X' then
 		to_draw = 4
 	end
 	if to_draw ~= 0 then
@@ -637,7 +636,7 @@ local function play_card(card)
 		end
 	end
 
-	if card:sub(1) == 'S' or card:sub(1) == 'D' or card:sub(1) == 'X' then -- not all Z, just X
+	if card:sub(1,1) == 'S' or card:sub(1,1) == 'D' or card:sub(1,1) == 'X' then -- not all Z, just X
 		-- shift to 0-base, apply rotation, then shift back ;)
 		turn = (((turn - 1) + order) % #players) + 1
 	end
