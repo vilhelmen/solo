@@ -674,7 +674,7 @@ local function play_card(card)
 	-- sanity check for fake cards, bot logic may end up building card strings :/
 	local did_eject = false
 	for i = 1, #players[turn].hand do
-		if #players[turn].hand[i] == card then
+		if players[turn].hand[i] == card then
 			table.remove(players[turn].hand, i)
 			did_eject = true
 			break
@@ -758,10 +758,10 @@ local function run(n)
 	initialize(n)
 	-- FIXME: debug stuff, skip player
 	turn = 2
-	dump()
 	-- TODO check initial wild (should be secretly handled by get_playable)
 
 while true do
+	dump()
 	local played, forced_play = '??', false
 
 	-- playable list is good for bots, mask is good for user
@@ -779,7 +779,7 @@ while true do
 
 	if turn ~= 1 then
 		-- offloading single-play, etc
-		analyze(playable)
+		played = analyze(playable)
 		-- TODO: UGH FIGURE IT OUT
 	else
 		-- player is human
