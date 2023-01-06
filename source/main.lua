@@ -217,6 +217,7 @@ local function get_good_colors(hand_color_stats)
 			table.insert(colors, hand_color_stats[i].color)
 		end
 	end
+	return colors
 end
 
 
@@ -368,9 +369,9 @@ local function analyze(playable)
 		-- FIXME: if the logic isn't tweaked, reverse play is going to be avoided until panic where it's actively unhelpful
 	end
 
-	local current_color = discard[#discard]:sub(2, 1)
+	local current_color = discard[#discard]:sub(2, 2)
 	if current_color == 'z' then
-		current_color = discard[#discard]:sub(3, 1)
+		current_color = discard[#discard]:sub(3, 3)
 		-- we may still be wildstart, but we need more hand info before we can handle it
 	end
 
