@@ -463,8 +463,8 @@ local function analyze(playable)
 		-- if it violates a rule or desire, throw it in a trash list
 		-- if it's fatal, basically ban it (but have to hold onto it in case we're boned)
 		-- pick from the lists in order of desperation
-		local card_bins = {{},{},{},{}}
-		-- local good_cards, boring_cards, bad_cards, fatal_cards = {}, {}, {}, {}
+		local card_bins = {{},{},{},{},{}}
+		-- local good_cards, reverse_limbo, boring_cards, bad_cards, fatal_cards = {}, {}, {}, {}
 		-- 1 = ideal wrt flags
 		-- 2 = normies(?)
 		-- 3 = against flags
@@ -490,14 +490,14 @@ local function analyze(playable)
 			if #color_data.D ~= 0 then
 				if skip_fatal then
 					-- table.move isn't ACTUALLY a move
-					fate = 4
+					fate = 5
 				elseif not is_good_color[color_data.color] then
-					fate = 3
+					fate = 4
 				elseif not do_punish then
 					if do_skip then
-						fate = 2
+						fate = 2 -- prefer to draw when do_skip and do_reverse collide
 					else
-						fate = 3
+						fate = 4
 					end
 				else
 					-- ??? do punish, not fatal, good color
@@ -511,9 +511,9 @@ local function analyze(playable)
 		for _, color_data in ipairs(playable_color_map) do
 			if #color_data.S ~= 0 then
 				if skip_fatal then
-					fate = 4
+					fate = 5
 				elseif not is_good_color[color_data.color] or not do_skip then
-					fate = 3
+					fate = 4
 				else
 					fate = 1
 				end
@@ -525,9 +525,9 @@ local function analyze(playable)
 		for _, color_data in ipairs(playable_color_map) do
 			if #color_data.R ~= 0 then
 				if reverse_fatal then
-					fate = 4
+					fate = 5
 				elseif not is_good_color[color_data.color] or not do_reverse then
-					fate = 3
+					fate = 4
 				else
 					-- -punish +skip good color draws will end up after good color reverses
 					--  AT BEST rank 2, If the bad color draws will be further bumped so the good color reverse will still play
@@ -541,12 +541,12 @@ local function analyze(playable)
 		for _, color_data in ipairs(playable_color_map) do
 			if #color_data.normal ~= 0 then
 				-- I think they're all just ok?
-				table.move(card_bins[2], 1, #color_data.normal, card_bins[fate] + 1)
+				table.move(card_bins[3], 1, #color_data.normal, #card_bins[3] + 1, color_data.normal)
 			end
 		end
 
 		-- pick first from first available bin
-		-- consider randomizing bins 3 and 4 draws?
+		-- consider randomizing bins 3-5 draws?
 		for _, bin in ipairs(card_bins) do
 			if #bin ~= 0 then
 				return bin[1]
