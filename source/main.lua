@@ -123,11 +123,15 @@ local function deduplicate_cards(card_pile)
 	for _, v in pairs(card_pile) do
 		singles[v] = true -- I can't imagine a value that would matter/save time
 	end
-	local dedupe = {}
+	local dedupe, z = {}, {}
 	for v, _ in pairs(singles) do
-		table.insert(dedupe, v)
+		if v:sub(2,1) ~= 'z' then
+			table.insert(dedupe, v)
+		else
+			table.insert(z, v)
+		end
 	end
-	return dedupe
+	return dedupe, z
 end
 
 
@@ -179,7 +183,7 @@ local function get_color_stats(card_pile)
 
 	-- pruning post-sort because I'm a terrible person
 	table.sort(color_log, function(a, b) return a.total > b.total end)
-	while color_log[#color_log].total == 0 do
+	while #color_log ~= 0 and color_log[#color_log].total == 0 do
 		table.remove(color_log)
 	end
 
@@ -206,18 +210,22 @@ end
 
 local function get_good_colors(hand_color_stats)
 	-- return color codes (desc) that are comparable in size to the largest
+
 	-- big brain time, if you have > 50% as many red as blue, then both look good
 	-- 6 and 2? Totally unequal. 6 and 3? close but eh. 6 and 4? sure!
 	-- 100 and 51? ehhh
-	local colors = {hand_color_stats[1].color} -- should probably check if this is empty
-	local threshold = hand_color_stats[1].total // 2 -- +1, >= ?
-	-- I'm not smart enough to start pairs() at 2. next(pairs())??? (no)
-	for i = 2, #hand_color_stats do
-		if hand_color_stats[i].total > threshold then
-			table.insert(colors, hand_color_stats[i].color)
+	if #hand_color_stats ~= 0 then
+		local colors = {hand_color_stats[1].color}
+		local threshold = hand_color_stats[1].total // 2 -- +1, >= ?
+		-- I'm not smart enough to start pairs() at 2. next(pairs())??? (no)
+		for i = 2, #hand_color_stats do
+			if hand_color_stats[i].total > threshold then
+				table.insert(colors, hand_color_stats[i].color)
+			end
 		end
+		return colors
 	end
-	return colors
+	return {}
 end
 
 
@@ -256,25 +264,18 @@ local function analyze(playable)
 	-- but a draw coming into here will short circuit:
 
 	-- we really only have one option
-	local deduplicated_playable = deduplicate_cards(playable)
-	if #deduplicated_playable == 1 then
-		-- but it might be a wild
-		if deduplicated_playable[1]:sub(2,2) ~= 'z' then
-			return deduplicated_playable[1]
-		end
-
-		local good_colors = get_good_colors(get_color_stats())
-		-- ...and we may only have wilds in our hand (this may be the last card)
-		if #good_colors ~= 0 then
-			-- it HAS to go into a variable to be used
-			-- 'rgby':sub(math.random(4)) is illegal
-			good_colors = {'r', 'g', 'b', 'y'}
-		end
-		return deduplicated_playable[1] .. good_colors[math.random(#good_colors)]
+	local deduplicated_color, deduplicated_z = deduplicate_cards(playable)
+	if #deduplicated_color == 1 then
+		return deduplicated_color[1]
+	elseif #deduplicated_color == 0 and #deduplicated_z == 1 then
+		-- if we have both z then we need more info to make a decision
+		-- I am not allowed to operate on a literal, table or string
+		local good_colors = {'r', 'g', 'b', 'y'}
+		return deduplicated_z[1] .. good_colors[math.random(#good_colors)]
 	end
 
 	local us_losing = false -- panic
-	local us_winning = #players[turn].hand <= PANIC_THRESHOLD
+	-- local us_winning = #players[turn].hand <= PANIC_THRESHOLD
 	local us_most_winning = true -- but are we the winningest? Causes panic
 	local least_cards = #players[turn].hand
 
@@ -375,8 +376,6 @@ local function analyze(playable)
 		-- we may still be wildstart, but we need more hand info before we can handle it
 	end
 
-	local to_play = nil
-
 	-- big brain, playable_z is strictly worse than hand_z because it's deduplicated
 	local playable_color_stats, playable_color_map = get_color_stats(playable)
 
@@ -400,7 +399,7 @@ local function analyze(playable)
 		-- in a geologic sense, the +4 happens either way
 		-- a later +4 minimizes their average play space
 
-		-- I do no like manufacturing the card code
+		local to_play
 		if do_punish and #hand_z.X ~= 0 and not skip_fatal then
 			-- no do_skip check here because I say so. if it's not fatal and we want to punish, EH.
 			--  we don't have much choice
@@ -409,6 +408,9 @@ local function analyze(playable)
 			to_play = hand_z.W[1] or hand_z.X[1]
 		end
 
+		if #good_colors == 0 then
+			good_colors = {'r', 'g', 'b', 'y'}
+		end
 		return to_play .. good_colors[math.random(#good_colors)]
 	end
 
@@ -422,7 +424,7 @@ local function analyze(playable)
 
 	-- local can_jump = #good_colors > 1 -- not wholly accurate since it's using good_colors
 	local only_jump = playable_color_map[current_color] == nil -- current color not in index
-	local should_jump = is_not_in(good_colors, current_color) and
+	local should_jump = only_jump or is_not_in(good_colors, current_color) and
 		(playable_color_stats[playable_color_map[current_color]].total > 2 or math.random(5) == 5) and
 		playable_color_stats[playable_color_map[current_color]].total ~= 1
 	-- we may not be in the top color, but we're comparable. But hold out if we only have <= two left
@@ -466,15 +468,16 @@ local function analyze(playable)
 		local card_bins = {{},{},{},{},{}}
 		-- local good_cards, reverse_limbo, boring_cards, bad_cards, fatal_cards = {}, {}, {}, {}
 		-- 1 = ideal wrt flags
-		-- 2 = normies(?)
-		-- 3 = against flags
-		-- 4 = NONONO
+		-- 2 = listen, reverse is complicated in that it's boring and sometimes we should use a draw as a skip
+		-- 3 = normies(?)
+		-- 4 = against flags
+		-- 5 = NONONO
 
 		-- I don't want to have to check this a million times
 		-- we want to iterate through all playable colors in good order, which is to say playable_color_map order
 		local is_good_color = {} --, is_current_color, color_order = {}, {}, {}
 		-- color_order is directly indexable into playable stats
-		for k, v in pairs(playable_color_map) do
+		for k, _ in pairs(playable_color_map) do
 			is_good_color[k] = is_in(good_colors, k)
 			-- is_current_color[k] = current_color == k
 			-- color_order[v] = k
@@ -483,6 +486,8 @@ local function analyze(playable)
 		-- FIXME: pairs() does not go in numerical order and idk if I knew that, check everything
 		-- FIXME: this should be a function but DAMN the number of arguments
 		-- FIXME: Should a bad color banish a card that otherwise we should do? Seems bad.
+		-- FIXME: When given multiple good colors we always pick the most populous due to sorting
+		--         BUT a bin does not necessarily have homogenous symbols. pls no nested symbol bins
 		local fate
 
 		-- DRAW
@@ -503,7 +508,7 @@ local function analyze(playable)
 					-- ??? do punish, not fatal, good color
 					fate = 1
 				end
-				table.move(card_bins[fate], 1, #color_data.D, card_bins[fate] + 1)
+				table.move(card_bins[fate], 1, #color_data.D, card_bins[fate] + 1, color_data.D)
 			end
 		end
 
@@ -517,7 +522,7 @@ local function analyze(playable)
 				else
 					fate = 1
 				end
-				table.move(card_bins[fate], 1, #color_data.S, card_bins[fate] + 1)
+				table.move(card_bins[fate], 1, #color_data.S, card_bins[fate] + 1, color_data.S)
 			end
 		end
 
@@ -533,7 +538,7 @@ local function analyze(playable)
 					--  AT BEST rank 2, If the bad color draws will be further bumped so the good color reverse will still play
 					fate = 2
 				end
-				table.move(card_bins[fate], 1, #color_data.R, card_bins[fate] + 1)
+				table.move(card_bins[fate], 1, #color_data.R, card_bins[fate] + 1, color_data.R)
 			end
 		end
 
@@ -545,10 +550,12 @@ local function analyze(playable)
 			end
 		end
 
-		-- pick first from first available bin
-		-- consider randomizing bins 3-5 draws?
-		for _, bin in ipairs(card_bins) do
+		-- pick first from first available (good) bin
+		for i, bin in ipairs(card_bins) do
 			if #bin ~= 0 then
+				if i > 2 then
+					return bin[math.random(#bin)]
+				end
 				return bin[1]
 			end
 		end
@@ -757,7 +764,7 @@ end
 local function run(n)
 	initialize(n)
 	-- FIXME: debug stuff, skip player
-	turn = 2
+	turn = 1
 	-- TODO check initial wild (should be secretly handled by get_playable)
 
 while true do
@@ -767,6 +774,8 @@ while true do
 	-- playable list is good for bots, mask is good for user
 	local playable, mask = get_playable()
 
+	-- UI problem, need to wait on player to pick draw before an interactive draw
+	-- maybe I just need two copies....
 	if #playable == 0 then
 		-- mask is garbage now
 		local drawn = draw_playable()
@@ -774,20 +783,15 @@ while true do
 		if played == nil then
 			return find_winner()
 		end
-		playable = {drawn}
+		playable = {drawn} -- still need to analyze because could be wild
 	end
 
 	if turn ~= 1 then
 		-- offloading single-play, etc
 		played = analyze(playable)
-		-- TODO: UGH FIGURE IT OUT
 	else
 		-- player is human
-		-- run a copy of get_playable, have it be a mask?
-		-- or just check the cards live
-		-- but a mask could let you highlight cards
-		-- like, playable cards are bumped up a quarter
-		-- or is that too "easy"? hand holdy?
+		played = player_card_select(mask)
 	end
 
 	local winner = play_card(played)
