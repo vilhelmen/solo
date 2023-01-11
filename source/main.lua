@@ -72,6 +72,7 @@ local discard = nil
 local players = nil
 local turn = nil
 local order = nil
+local k_id = nil
 
 local function initialize(player_count)
 	-- boot everything for the primary loop
@@ -125,7 +126,7 @@ local function deduplicate_cards(card_pile)
 	end
 	local dedupe, z = {}, {}
 	for v, _ in pairs(singles) do
-		if v:sub(2,1) ~= 'z' then
+		if v:sub(2, 2) ~= 'z' then
 			table.insert(dedupe, v)
 		else
 			table.insert(z, v)
@@ -198,10 +199,12 @@ end
 
 
 local function dump()
-	print('TOD: ', discard[#discard])
-	print('Current player: ', turn)
+	print('ToD: ', discard[#discard])
+	print('Deck: ', deck[#deck] or 'none')
+	print('Turn: ', turn)
+	print('k_id: ', k_id)
 	print('Order: ', order)
-	print('Hands: ')
+	print('Hands:')
 	for i, v in ipairs(players) do
 		print('', i, table.concat(v.hand, ','))
 	end
@@ -439,7 +442,7 @@ local function analyze(playable)
 	--  one could consider a color change strategic tho, but is it better than direct punishment (if available)
 	if only_jump or current_color == nil or (should_jump and not panic) then
 		-- none of current color, or wildstart, or current color is not good
-		return get_good_color_card(good_colors, hand_color_stats, hand_color_map)
+		return get_good_color_card(good_colors, playable_color_stats, playable_color_map)
 	end
 
 	-- UHHH the inverse of good_colors? Any color that has (strictly?) more cards
@@ -672,13 +675,20 @@ local function play_card(card)
 	-- Apply draw/skip/etc
 	-- returns winner vector or nil
 
+	-- UHHHHHHH I never verify the play is valid and apparently it's not
+	if discard[#discard]:sub(2, 2) ~= card:sub(2, 2) and discard[#discard]:sub(1, 1) ~= card:sub(1, 1)
+			and discard[#discard]:sub(3, 3) ~= card:sub(2, 2) and card:sub(2, 2) ~= 'z' then
+		error('Illegal play: ' .. discard[#discard] .. ' <- ' .. card)
+	end
+
 	-- place ToD
 	table.insert(discard, card)
-	-- Strip any 3codes
-	discard[#discard - 1] = string.sub(discard[#discard - 1], 1, 2)
-	card = string.sub(card, 1, 2)
-	-- FIXME, extract card symbol
+	-- Strip any 3codes if they exist
+	discard[#discard - 1] = discard[#discard - 1]:sub(1, 2)
+	local symbol = card:sub(1, 1)
+
 	-- sanity check for fake cards, bot logic may end up building card strings :/
+	card = card:sub(1, 2) -- strip 3code because we won't see it in the hand
 	local did_eject = false
 	for i = 1, #players[turn].hand do
 		if players[turn].hand[i] == card then
@@ -688,9 +698,7 @@ local function play_card(card)
 		end
 	end
 	if not did_eject then
-		-- tbh maybe I should raise
-		error('Illegal play: ' .. card)
-		-- print('AAAAA fake card', card)
+		error('Forged card: ' .. card)
 	end
 
 	-- only the playing person can win right now
@@ -705,16 +713,16 @@ local function play_card(card)
 	--  anyone can win when applying a draw
 	-- skip apply
 
-	if card:sub(1,1) == 'R' then
+	if symbol == 'R' then
 		order = order * -1
 	end
 
 	turn = (((turn - 1) + order) % #players) + 1
 
 	local to_draw = 0
-	if card:sub(1,1) == 'D' then
+	if symbol == 'D' then
 		to_draw = 2
-	elseif card:sub(1,1) == 'X' then
+	elseif symbol == 'X' then
 		to_draw = 4
 	end
 	if to_draw ~= 0 then
@@ -763,8 +771,7 @@ end
 
 local function run(n)
 	initialize(n)
-	-- FIXME: debug stuff, skip player
-	turn = 1
+	k_id = 0
 	-- TODO check initial wild (should be secretly handled by get_playable)
 
 while true do
@@ -780,13 +787,13 @@ while true do
 		-- mask is garbage now
 		local drawn = draw_playable()
 		forced_play = true
-		if played == nil then
+		if drawn == nil then
 			return find_winner()
 		end
 		playable = {drawn} -- still need to analyze because could be wild
 	end
 
-	if turn ~= 1 then
+	if turn ~= 5 then
 		-- offloading single-play, etc
 		played = analyze(playable)
 	else
@@ -798,6 +805,7 @@ while true do
 	if winner ~= nil then
 		return winner
 	end
+	k_id = k_id + 1
 end end
 
 
